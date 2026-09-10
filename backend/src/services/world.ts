@@ -43,6 +43,17 @@ export type OpaqueProof =
   | OpaqueProof[]
   | { [key: string]: OpaqueProof };
 
+export const jsonValueSchema: z.ZodType<OpaqueProof> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(jsonValueSchema),
+  ]),
+);
+
 /** Narrow fetch surface so tests can stub the portal without a network. */
 export interface WorldFetch {
   (

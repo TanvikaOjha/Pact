@@ -95,8 +95,9 @@ backend/
   src/
     server.ts            entry: loadEnv() + listen
     app.ts               createApp(): json → requestId → healthRouter → errorHandler
-    config/env.ts        zod env schema + loadEnv()
+    config/env.ts        zod env schema + loadEnv() (envFlag() for booleans)
     config/supabase.ts   Supabase client
+    chain/registry.ts    viem read-only Registry access (isBusinessActive; null when unconfigured)
     middleware/http.ts   requestId + errorHandler
     middleware/privyAuth.ts  Identity + createRequireAuth (Bearer via @privy-io/node;
     dev-header privyAuthStub only when ALLOW_DEV_AUTH=true)
@@ -106,11 +107,15 @@ backend/
     routes/me.test.ts    HTTP tests (real app + fetch on ephemeral port)
     routes/world.ts      POST /api/world/verify (Selfie Check; behind requireAuth)
     routes/world.test.ts HTTP tests (stub mode)
+    routes/businesses.ts POST /api/businesses/register (World→dedupe→mirror row;
+    caller sends registerBusiness tx themselves; ENS minting follows)
+    routes/businesses.test.ts HTTP tests (memory store)
+    repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
     services/log.ts      the only logger (no-console rule)
     services/world.ts    portal verify via fetch to v4/verify/{rp_id} + zod parsing
     types/express.d.ts   Request augmentation
-    repos/  ens/         empty placeholders — check before adding duplicates
-  supabase/migrations/0001_pact_core.sql
+    repos/  ens/         repos has businesses.ts; ens/ still empty — check before adding duplicates
+  supabase/migrations/0001_pact_core.sql + 0002_business_session_unique.sql
   oxlint.config.ts
   vitest.config.ts     scopes `npm test` to `src/**` (excludes submodule RuleTester files)
   tools/oxlint/anti-slop/    lint plugin (submodule; loaded by oxlint.config.ts)

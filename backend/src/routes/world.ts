@@ -1,18 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 
-import { verifyWorldProof, type OpaqueProof } from "../services/world.js";
-
-const jsonValueSchema: z.ZodType<OpaqueProof> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(jsonValueSchema),
-  ]),
-);
+import { verifyWorldProof, jsonValueSchema } from "../services/world.js";
 
 const worldVerifyRequestSchema = z.object({
   /** Complete IDKit result, forwarded to the portal byte-for-byte. */
