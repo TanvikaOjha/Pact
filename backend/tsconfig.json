@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": "src",
+    "noEmitOnError": true,
     "resolveJsonModule": true,
     "declaration": true
   },

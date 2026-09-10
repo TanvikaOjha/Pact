@@ -60,6 +60,12 @@ reputation record; the escrow guards it against double-emit (`completedEmitted` 
 **Do not edit submodule contents in place.** Rule changes go in the `Copernicium282/anti-slop`
 fork: push there, then `git submodule update --remote backend/tools/oxlint/anti-slop`.
 
+**Privy API usage comes from docs + installed types, never memory.** Auth uses
+`@privy-io/node` (NOT the legacy `@privy-io/server-auth`). Before touching any Privy call,
+check `docs.privy.io` AND the installed `node_modules/@privy-io/node` `.d.ts` — the SDK
+migrated once already (`verifyAuthToken` → `verifyAccessToken`, camelCase → snake_case
+`User`). Do not add `server-auth` back.
+
 ## Setup
 
 1. **Submodules** (required — lint/build/test fail on fresh clones without them):
@@ -92,13 +98,18 @@ backend/
     config/env.ts        zod env schema + loadEnv()
     config/supabase.ts   Supabase client
     middleware/http.ts   requestId + errorHandler
-    middleware/privyAuth.ts  Identity + dev privyAuthStub (dev-only, not mounted)
-    routes/health.ts     GET /health → { ok, service }
+    middleware/privyAuth.ts  Identity + createRequireAuth (Bearer via @privy-io/node;
+    dev-header privyAuthStub only when ALLOW_DEV_AUTH=true)
+    middleware/privyAuth.test.ts  resolveIdentity unit tests
+    routes/health.ts     GET /health → { ok, service } (public; /api/* requires auth)
+    routes/me.ts         GET /api/me → { identity } (behind requireAuth)
+    routes/me.test.ts    HTTP tests (real app + fetch on ephemeral port)
     services/log.ts      the only logger (no-console rule)
     types/express.d.ts   Request augmentation
     repos/  ens/         empty placeholders — check before adding duplicates
   supabase/migrations/0001_pact_core.sql
   oxlint.config.ts
+  vitest.config.ts     scopes `npm test` to `src/**` (excludes submodule RuleTester files)
   tools/oxlint/anti-slop/    lint plugin (submodule; loaded by oxlint.config.ts)
 contracts/
   src/PactRegistry.sol       registry: proposals, signatures, setEscrow (admin, one-time)
@@ -109,7 +120,8 @@ contracts/
   src/interfaces/IERC20.sol
   test/PactRegistry.t.sol  test/PactEscrow.t.sol
 .env.example                 root copy (13 vars)
-backend/.env.example         authoritative copy (adds PORT, DEV_WORLD_STUB, DATABASE_URL)
+backend/.env.example         authoritative copy (adds PORT, DEV_WORLD_STUB, ALLOW_DEV_AUTH,
+                             PRIVY_JWT_VERIFICATION_KEY, DATABASE_URL)
 ```
 
 ## Commands
@@ -127,9 +139,12 @@ Contracts (run in `contracts/`): `forge build` · `forge test`
 - **Required** (zod-enforced in `src/config/env.ts`): `SEPOLIA_RPC_URL`, `SUPABASE_URL`,
   `SUPABASE_SERVICE_KEY`
 - **Optional:** `DEPLOYER_PRIVATE_KEY`, `PACT_ETH_OWNER_PRIVATE_KEY`, `PRIVY_APP_ID` /
-  `PRIVY_APP_SECRET`, `WORLD_APP_ID` / `WORLD_ACTION_ID`, `RESEND_API_KEY`,
+  `PRIVY_APP_SECRET`, `PRIVY_JWT_VERIFICATION_KEY` (skips JWKS fetch on verify),
+  `WORLD_APP_ID` / `WORLD_ACTION_ID`, `RESEND_API_KEY`,
   `USDC_SEPOLIA_ADDRESS`, `PACT_REGISTRY_ADDRESS`, `PACT_ESCROW_ADDRESS`
-- **Defaults:** `PORT=4000`, `DEV_WORLD_STUB=true`
+- **Defaults:** `PORT=4000`, `DEV_WORLD_STUB=true`, `ALLOW_DEV_AUTH=false` (dev-header
+  auth is opt-in; never enable in prod). Flags parse strict `"true"`/`"false"` via
+  `envFlag()` — never use `z.coerce.boolean()` for flags (`Boolean("false")` is true).
 - `DATABASE_URL` appears in the example but is **not** in the zod schema — do not rely on it.
 
 Contract wiring: `USDC_SEPOLIA_ADDRESS` → `PactEscrow` constructor; `PACT_REGISTRY_ADDRESS` /
@@ -145,6 +160,10 @@ time, admin-only — reverts with `EscrowAlreadySet` after) and `escrow.setWorld
 - `.gitignore` mentions `frontend/` and `ens/` — neither exists. Do not create them unasked.
 - `src/repos/` and `src/ens/` are empty placeholders — check them before adding new modules.
 - `privyAuthStub` trusts the `x-wallet-address` header (`x-privy-wallet-id` defaults to
-  `"dev"`; missing wallet → 401 `missing_identity`). It is **not mounted** in `createApp()` —
-  never treat these headers as secure.
+  `"dev"`; missing wallet → 401 `missing_identity`). It only runs when `ALLOW_DEV_AUTH=true`
+  (default false) — never enable in prod, never treat these headers as secure.
+- Bearer tokens are Privy **access tokens** (ES256 JWT, ~1h expiry, `Authorization: Bearer`).
+  `resolveIdentity` prefers the embedded ethereum wallet, else first ethereum wallet;
+  `privyWalletId` is the embedded id or the user DID. Users with no ethereum wallet get
+  401 `no_wallet`.
 - `MockUSDC.mint` has no access control — testnet only.

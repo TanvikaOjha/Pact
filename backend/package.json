@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@privy-io/node": "^0.34.0",
     "@supabase/supabase-js": "^2.45.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

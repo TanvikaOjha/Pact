@@ -5,12 +5,22 @@ import { log } from "../services/log.js";
 
 dotenv.config();
 
+/** Strict "true"/"false" flag parsing. Never use z.coerce.boolean() for flags:
+// Boolean("false") === true, so ALLOW_X=false would silently enable X. */
+function envFlag(defaultValue: boolean) {
+  return z
+    .enum(["true", "false"])
+    .default(defaultValue ? "true" : "false")
+    .transform((value) => value === "true");
+}
+
 const envSchema = z.object({
   SEPOLIA_RPC_URL: z.string().url().or(z.string().min(1)),
   DEPLOYER_PRIVATE_KEY: z.string().optional(),
   PACT_ETH_OWNER_PRIVATE_KEY: z.string().optional(),
   PRIVY_APP_ID: z.string().optional(),
   PRIVY_APP_SECRET: z.string().optional(),
+  PRIVY_JWT_VERIFICATION_KEY: z.string().optional(),
   WORLD_APP_ID: z.string().optional(),
   WORLD_ACTION_ID: z.string().optional(),
   SUPABASE_URL: z.string().url("SUPABASE_URL must be a URL"),
@@ -20,7 +30,8 @@ const envSchema = z.object({
   PACT_REGISTRY_ADDRESS: z.string().optional(),
   PACT_ESCROW_ADDRESS: z.string().optional(),
   PORT: z.coerce.number().default(4000),
-  DEV_WORLD_STUB: z.coerce.boolean().default(true),
+  DEV_WORLD_STUB: envFlag(true),
+  ALLOW_DEV_AUTH: envFlag(false),
 });
 
 export type Env = z.infer<typeof envSchema>;
