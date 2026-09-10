@@ -40,3 +40,46 @@ Thumbs.db
 *.njsproj
 *.sln
 *.swp
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Node / backend
+node_modules/
+backend/node_modules/
+backend/dist/
+backend/coverage/
+*.log
+npm-debug.log*
+
+# Frontend (Next.js, per spec screen plan)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/coverage/
+
+# ENS scripts output
+ens/node_modules/
+ens/dist/
+
+# Foundry / contracts
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+contracts/lib/
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+backend/supabase/.branches/
+backend/supabase/.temp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
