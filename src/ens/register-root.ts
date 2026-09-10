@@ -1,4 +1,7 @@
 import {
+  ENSV2_SEPOLIA,
+} from '../config/ensv2.js'
+import {
   erc20Abi,
   parseAbi,
   parseUnits,
@@ -12,10 +15,10 @@ import {
 } from '../config/viem'
 
 const ETH_REGISTRAR =
-  '0xa4449a0dd2b83007553d9b1d28b583a46a805a30' as const
+  ENSV2_SEPOLIA.ethRegistrar as `0x${string}`
 
 const MOCK_USDC =
-  '0xd3322b29a7bdee707d1684676f149bf41aa3422f' as const
+  ENSV2_SEPOLIA.mockUsdc as `0x${string}`
 
 const label = 'pact-hack'
 
