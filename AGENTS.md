@@ -104,7 +104,10 @@ backend/
     routes/health.ts     GET /health → { ok, service } (public; /api/* requires auth)
     routes/me.ts         GET /api/me → { identity } (behind requireAuth)
     routes/me.test.ts    HTTP tests (real app + fetch on ephemeral port)
+    routes/world.ts      POST /api/world/verify (Selfie Check; behind requireAuth)
+    routes/world.test.ts HTTP tests (stub mode)
     services/log.ts      the only logger (no-console rule)
+    services/world.ts    portal verify via fetch to v4/verify/{rp_id} + zod parsing
     types/express.d.ts   Request augmentation
     repos/  ens/         empty placeholders — check before adding duplicates
   supabase/migrations/0001_pact_core.sql

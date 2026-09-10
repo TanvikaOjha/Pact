@@ -4,6 +4,7 @@ import { errorHandler, requestId } from "./middleware/http.js";
 import { createRequireAuth, createPrivyVerifier, getPrivyClient } from "./middleware/privyAuth.js";
 import { healthRouter } from "./routes/health.js";
 import { meRouter } from "./routes/me.js";
+import { createWorldRouter } from "./routes/world.js";
 
 export function createApp() {
   const env = loadEnv();
@@ -24,6 +25,13 @@ export function createApp() {
     }),
   );
   apiRouter.use(meRouter);
+  apiRouter.use(
+    createWorldRouter({
+      devWorldStub: env.DEV_WORLD_STUB,
+      rpId: env.WORLD_APP_ID,
+      expectedAction: env.WORLD_ACTION_ID,
+    }),
+  );
   app.use("/api", apiRouter);
   app.use(errorHandler);
   return app;
