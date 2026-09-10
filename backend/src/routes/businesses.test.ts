@@ -82,6 +82,7 @@ describe("POST /api/businesses/register (stub world, memory store)", () => {
         store: createMemoryStore(),
         checkChainActive: null,
         world: { devWorldStub: true, rpId: undefined, expectedAction: undefined },
+        ensRoot: "pact-hack.eth",
       }),
     );
     await new Promise<void>((resolve) => {
@@ -110,7 +111,7 @@ describe("POST /api/businesses/register (stub world, memory store)", () => {
   test("registers a new business and returns the on-chain session hash", async () => {
     const { status, body } = await postRegister(port, WALLET_A, { slug: "studio", proof: "x" });
     expect(status).toBe(201);
-    expect(body.ensSubname).toBe("studio.pact.eth");
+    expect(body.ensSubname).toBe("studio.pact-hack.eth");
     expect(body.walletAddress).toBe(WALLET_A);
     expect(body.status).toBe("pending_onchain");
     expect(body.worldSessionId ?? "").toMatch(/^session_dev_/);
@@ -125,7 +126,7 @@ describe("POST /api/businesses/register (stub world, memory store)", () => {
     const taken = await postRegister(port, WALLET_B, { slug: "studio", proof: "x" });
     expect(taken.status).toBe(409);
     expect(taken.body.error).toBe("slug_taken");
-    expect(taken.body.suggestions).toEqual(["studio-2.pact.eth", "studio-3.pact.eth"]);
+    expect(taken.body.suggestions).toEqual(["studio-2.pact-hack.eth", "studio-3.pact-hack.eth"]);
 
     const badSlug = await postRegister(port, WALLET_B, { slug: "AB", proof: "x" });
     expect(badSlug.status).toBe(400);
@@ -137,6 +138,6 @@ describe("POST /api/businesses/register (stub world, memory store)", () => {
   test("normalizes slugs to lowercase", async () => {
     const { status, body } = await postRegister(port, WALLET_C, { slug: "Acme-Studio", proof: "x" });
     expect(status).toBe(201);
-    expect(body.ensSubname).toBe("acme-studio.pact.eth");
+    expect(body.ensSubname).toBe("acme-studio.pact-hack.eth");
   });
 });

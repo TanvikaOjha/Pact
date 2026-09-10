@@ -1,8 +1,8 @@
 # Pact — Agent Guide
 
-Read this file first. Repo root is `Pact/` with two workspaces: `backend/` (Express + TS API,
-`@pact/backend`) and `contracts/` (Foundry). There is no root `package.json` — always run
-commands inside one workspace.
+Read this file first. Repo root is `Pact/` with two packages: `backend/` (Express + TS API,
+`@pact/backend`, ESM) and `contracts/` (Foundry) — plus a root-level `pact` package
+(CommonJS CLI scripts under `src/`). Always run commands inside one workspace.
 
 Never edit, stage, or commit anything outside this directory — only files under the repo
 root are part of the project.
@@ -127,9 +127,12 @@ contracts/
   src/MockUSDC.sol           testnet USDC (mint is open — testnet only)
   src/interfaces/IERC20.sol
   test/PactRegistry.t.sol  test/PactEscrow.t.sol
-.env.example                 root copy (13 vars)
-backend/.env.example         authoritative copy (adds PORT, DEV_WORLD_STUB, ALLOW_DEV_AUTH,
+.env.example                 root copy (shared template: chain, Privy, World, Supabase,
+                             ENS_ROOT_NAME, backend-only keys)
+backend/.env.example         authoritative copy for backend work (adds PORT, DEV_WORLD_STUB, ALLOW_DEV_AUTH,
                              PRIVY_JWT_VERIFICATION_KEY, DATABASE_URL)
+src/                         teammate ENS CLI scripts (CommonJS, `npx tsx src/ens/*.ts`;
+                             NOT importable from backend — see gotchas)
 ```
 
 ## Commands
@@ -142,7 +145,8 @@ Contracts (run in `contracts/`): `forge build` · `forge test`
 
 ## Env
 
-`backend/.env.example` is authoritative; the root copy lacks backend-only keys.
+`backend/.env.example` is authoritative; the root copy is the team-shared template
+(restore point: Day-0 13 vars + ENS_ROOT_NAME + backend keys).
 
 - **Required** (zod-enforced in `src/config/env.ts`): `SEPOLIA_RPC_URL`, `SUPABASE_URL`,
   `SUPABASE_SERVICE_KEY`
@@ -151,8 +155,10 @@ Contracts (run in `contracts/`): `forge build` · `forge test`
   `WORLD_APP_ID` / `WORLD_ACTION_ID`, `RESEND_API_KEY`,
   `USDC_SEPOLIA_ADDRESS`, `PACT_REGISTRY_ADDRESS`, `PACT_ESCROW_ADDRESS`
 - **Defaults:** `PORT=4000`, `DEV_WORLD_STUB=true`, `ALLOW_DEV_AUTH=false` (dev-header
-  auth is opt-in; never enable in prod). Flags parse strict `"true"`/`"false"` via
-  `envFlag()` — never use `z.coerce.boolean()` for flags (`Boolean("false")` is true).
+  auth is opt-in; never enable in prod), `ENS_ROOT_NAME=pact-hack.eth` (the root actually
+  registered on Sepolia — do NOT change to `pact.eth` until it exists on-chain). Flags parse
+  strict `"true"`/`"false"` via `envFlag()` — never use `z.coerce.boolean()` for flags
+  (`Boolean("false")` is true).
 - `DATABASE_URL` appears in the example but is **not** in the zod schema — do not rely on it.
 
 Contract wiring: `USDC_SEPOLIA_ADDRESS` → `PactEscrow` constructor; `PACT_REGISTRY_ADDRESS` /
@@ -174,4 +180,9 @@ time, admin-only — reverts with `EscrowAlreadySet` after) and `escrow.setWorld
   `resolveIdentity` prefers the embedded ethereum wallet, else first ethereum wallet;
   `privyWalletId` is the embedded id or the user DID. Users with no ethereum wallet get
   401 `no_wallet`.
-- `MockUSDC.mint` has no access control — testnet only.
+- `src/` (root) scripts target `*.pact-hack.eth` via CLI (`console.*`, `process.exit`,
+  key required at import). Never import them from `backend/` (ESM vs CommonJS, logging
+  rules, wallet-on-import) — port pure pieces (addresses, ABIs, record keys) into
+  `backend/src/ens/` instead. Known issues there: resolver-salt collision on re-mint,
+  `set-business-records` signs as Pact vs business-owned resolver, `"pending"` world-session
+  placeholder, 6-hex engagement collisions. Five files are still 0-byte stubs.

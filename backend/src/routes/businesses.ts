@@ -20,6 +20,8 @@ export interface BusinessesRouteOptions {
     rpId: string | undefined;
     expectedAction: string | undefined;
   };
+  /** ENS root subnames live under (env ENS_ROOT_NAME, pact-hack.eth on Sepolia). */
+  ensRoot: string;
 }
 
 function devSessionId(): string {
@@ -29,11 +31,12 @@ function devSessionId(): string {
 async function suggestSlugs(
   store: BusinessStore,
   slug: string,
+  ensRoot: string,
   limit: number,
 ): Promise<string[]> {
   const suggestions: string[] = [];
   for (let counter = 2; suggestions.length < limit; counter += 1) {
-    const candidate = `${slug}-${counter}.pact.eth`;
+    const candidate = `${slug}-${counter}.${ensRoot}`;
     const taken = await store.findBySubname(candidate);
     if (taken === null) suggestions.push(candidate);
   }
@@ -75,10 +78,13 @@ async function handleRegister(
     res.status(409).json({ error: "already_registered", ensSubname: existing.ens_subname });
     return;
   }
-  const ensSubname = `${slug}.pact.eth`;
+  const ensSubname = `${slug}.${options.ensRoot}`;
   const slugTaken = await options.store.findBySubname(ensSubname);
   if (slugTaken !== null) {
-    res.status(409).json({ error: "slug_taken", suggestions: await suggestSlugs(options.store, slug, 2) });
+    res.status(409).json({
+      error: "slug_taken",
+      suggestions: await suggestSlugs(options.store, slug, options.ensRoot, 2),
+    });
     return;
   }
   const sessionId = await verifySession(proof, options, res);

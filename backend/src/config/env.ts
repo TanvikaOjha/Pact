@@ -29,6 +29,9 @@ const envSchema = z.object({
   USDC_SEPOLIA_ADDRESS: z.string().optional(),
   PACT_REGISTRY_ADDRESS: z.string().optional(),
   PACT_ESCROW_ADDRESS: z.string().optional(),
+  // pact-hack.eth is what's actually registered on Sepolia (see src/ens audit);
+  // switch to pact.eth only after it is registered + verified on-chain.
+  ENS_ROOT_NAME: z.string().min(1).default("pact-hack.eth"),
   PORT: z.coerce.number().default(4000),
   DEV_WORLD_STUB: envFlag(true),
   ALLOW_DEV_AUTH: envFlag(false),

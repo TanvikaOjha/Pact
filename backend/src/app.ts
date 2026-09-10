@@ -43,6 +43,7 @@ export function createApp() {
         rpId: env.WORLD_APP_ID,
         expectedAction: env.WORLD_ACTION_ID,
       },
+      ensRoot: env.ENS_ROOT_NAME,
     }),
   );
   apiRouter.use(
