@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { TEMPLATES, CUSTOM_TEMPLATE } from "../../lib/templates";
+import { TEMPLATES, CUSTOM_TEMPLATE } from "@/lib/templates";
 
 export default function TemplatePicker() {
   const { currentBusiness, engagementsForCurrentBusiness } = useStore();

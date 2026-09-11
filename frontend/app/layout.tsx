@@ -37,7 +37,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${fraunces.variable} ${inter.variable} ${plexMono.variable} font-sans text-ink`}
+        className={`${fraunces.variable} ${inter.variable} ${plexMono.variable} antialiased`}
+        style={{ fontFamily: "var(--font-inter), sans-serif"}}
       >
         <StoreProvider>
           <Nav />

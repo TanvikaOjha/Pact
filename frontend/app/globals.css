@@ -2,6 +2,11 @@
 /* stylelint-disable at-rule-no-unknown */
 @import "tailwindcss";
 /* stylelint-enable at-rule-no-unknown */
+@theme {
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-fraunces);
+  --font-mono: var(--font-plex-mono);
+}
 
 :root {
   color-scheme: light;
