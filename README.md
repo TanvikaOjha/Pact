@@ -1,14 +1,14 @@
-# Pact
+# Pact - Mutual B2B Engagement, On-Chain
 
-**Mutual B2B engagement on-chain. Propose, commit, deliver, get paid — with reputation that's yours forever.**
+Pact is a decentralized engagement platform where two businesses propose, commit, and settle work in USDC with terms on ENS, escrow enforced on-chain, and reputation that's owned by the business, not the platform.
 
-Pact is a B2B engagement platform where two businesses propose, commit, and settle work in USDC using one of six contract templates. Terms live on ENS as text records, escrow is enforced on-chain, and every completed engagement writes a permanent, portable reputation record — one that outlives Pact itself.
+Two parties fund escrow before work starts, verify the exact terms by resolving a public ENS name, and build a permanent track record that survives even if Pact shuts down.
 
-Built for ETHOnline 2026. Targets three tracks: **ENSv2 Best Use** ($4,500), **Privy B2B Financial Product** ($2,500), **World Selfie Check** ($3,500).
+Built for ETHOnline 2026 · Targets ENSv2, Privy, and World Selfie Check tracks.
 
 ---
 
-## The problem
+## The Problem It Solves
 
 Two small businesses working together today rely on emailed Word docs, PayPal invoices, and hope:
 
@@ -19,15 +19,19 @@ Two small businesses working together today rely on emailed Word docs, PayPal in
 Pact fixes all three: both parties fund USDC escrow before work starts, terms are ENS text records anyone can verify, and reputation is an on-chain event log neither party nor Pact controls.
 
 ---
+## 🚀 Key Features
 
-## How it works (end-to-end)
+📜 **Six Contract Templates** Fixed Delivery, Milestone, Retainer, Time & Materials, Recurring Delivery, and Split Delivery — plus a guided custom builder for anything else.
 
-1. **Identity** — Sign in with email (Privy embedded wallet, no seed phrase). Mint `<slug>.pact.eth` with EAC fuses burned so Pact cannot revoke it. Pass World Selfie Check once; session ID written to `pact:world-verified`.
-2. **Propose** — Pick one of six templates (or the guided custom builder), fill 4–6 fields, preview the exact ENS text records that will be written.
-3. **Both sign** — Counterparty opens the proposal link, resolves the terms live from ENS ("Verify on ENS" — pure client-side, no backend), and signs. USDC funds `PactEscrow`. An engagement subname (`eng-<hex>.pact.eth`) is minted.
-4. **Work happens** — Provider submits a completion notice. Counterparty has a configured acceptance window (48h–7 days).
-5. **Release (backend-optional)** — `PactEscrow.releaseMilestone()` is callable directly by the accepting party's wallet. If the window lapses, `autoRelease()` fires instead (callable by anyone, e.g. a Privy session signer). Pact's server is never in the critical path of fund release.
-6. **Reputation** — On completion, `PactCompleted` emits both parties' ENS subnames, template type, value, an `onTime` flag, and a `disputed` flag. This event *is* the reputation record — reproducible by anyone from the block explorer.
+🔐 **Mutual Commitment** Both parties sign and the client funds USDC escrow before the provider starts work. No one-sided contracts.
+
+🧾 **Terms on ENS, Not PDFs** Every engagement's scope, amount, deadline, and acceptance criteria are ENSIP-5 text records — readable and verifiable by anyone before signing.
+
+⚡ **Backend-Optional Release** releaseMilestone() and autoRelease() are callable directly on-chain by either party's wallet. Pact's server is never required for funds to move.
+
+🏅 **Portable On-Chain Reputation** Every completed engagement emits a PactCompleted event — the reputation record. It lives on the contract, not in Pact's database.
+
+🙋 **Verified Business Identity** World Selfie Check confirms a live human behind each business subname, once at signup and again for high-value milestone releases.
 
 ```mermaid
 sequenceDiagram
@@ -60,7 +64,7 @@ sequenceDiagram
 
 ---
 
-## The six templates
+## 📜 The Six Templates
 
 | # | Template | Use case | Payment structure |
 |---|---|---|---|
@@ -75,7 +79,7 @@ A seventh path — a 6-question guided **custom builder** — covers everything 
 
 ---
 
-## Architecture
+## 🏗️ Architecture Overview
 
 ```
 Next.js (App Router, TS, Tailwind) ── Privy embedded wallets/session signers
@@ -122,23 +126,9 @@ flowchart TB
     style opt stroke-dasharray: 5 5
 ```
 
-**Design philosophy: backend-optional.** A Node/Express + Supabase backend exists for proposal storage, notifications, and a reputation-events cache — but it mirrors on-chain state and is never required for fund release or terms verification. If Pact's server disappears, `releaseMilestone()`, `autoRelease()`, and ENS resolution keep working.
-
 ---
 
-## Repo layout
-
-```
-pact/
-  contracts/     PactRegistry.sol, PactEscrow.sol — Solidity 0.8.24, Foundry
-  ens/            ENSv2 scripts (subname minting, text records) — shares contracts/ ABI
-  backend/        Express + TS + Supabase — proposals, notifications, reputation indexing
-  frontend/       Next.js 14, TypeScript, Tailwind — lib/stubs.ts isolates Privy/World/ENS integrations
-```
-
----
-
-## Tech stack
+## 🧱 Tech Stack
 
 | Layer | Choice |
 |---|---|
@@ -152,27 +142,10 @@ pact/
 | Email | Resend |
 | Deployment | Vercel (frontend), Railway (backend), Sepolia (contracts/ENS) |
 
----
-
-## Current build status
-
-**Smart contracts** — `PactRegistry.sol` and `PactEscrow.sol` compile cleanly on solc 0.8.24. Implemented: business registration with World proof, mutual engagement creation and dual-signature flow, milestone escrow with order-independent pair nonces, `highValueThreshold`-gated releases, `autoRelease` (the FilePizza mechanic), atomic split delivery via basis-point shares, and `PactCompleted` as the on-chain reputation record.
-
-**Frontend** — Full Next.js 14 scaffold (App Router, TypeScript, Tailwind) with six screens: landing, identity setup, template picker, dynamic template form with terms preview, and supporting infrastructure. Paper/ledger aesthetic — dark ink `#14171C`, brass `#C89B5C`, verified teal `#5C9C8F`; Fraunces + IBM Plex Sans.
-
-**Open gap:** `_subnameOf` in `PactEscrow` currently returns the *engagement-level* ENS subname rather than each business's individual subname (e.g. `studio.pact.eth`). Needs a fix before the Day 4 freeze — either add a business-subname lookup to `PactRegistry`, or resolve it off-chain via an indexer.
 
 ---
 
-## Design principles
-
-- **Backend-optional by design** — `autoRelease()` and a localStorage-backed frontend context store exist specifically so early development (and the live demo) never depends on Pact's server being up.
-- **Deterministic terms hashing** — canonical JSON + `keccak256` via `viem` must match the on-chain script byte-for-byte. This is a correctness constraint, not a convention: mismatched hashes break the "verify before you sign" feature.
-- **Clean integration seam** — `lib/stubs.ts` isolates all Privy, World Selfie Check, and ENS integration points for easy swap-out as SDKs mature.
-
----
-
-## Getting started
+## ⚙️ Setup & Installation
 
 > Contracts and frontend are further along than backend/ENS scripting — check each workspace's own state before assuming parity with the plan below.
 
@@ -182,15 +155,14 @@ cd contracts
 forge install OpenZeppelin/openzeppelin-contracts
 forge test -vv
 forge create src/PactRegistry.sol:PactRegistry \
-  --rpc-url $SEPOLIA_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY
+  --rpc-url $SEPOLIA_RPC_URL --private-key $DEPLOYER_PRIVATE_KE
 
 # Frontend
 cd frontend
 npm install
 npm run dev
 ```
-
-Required environment variables:
+## 🔗 Environment Variables
 
 ```
 SEPOLIA_RPC_URL=
