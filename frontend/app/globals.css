@@ -1,0 +1,130 @@
+/* Tailwind directives are processed by PostCSS. */
+/* stylelint-disable at-rule-no-unknown */
+@import "tailwindcss";
+/* stylelint-enable at-rule-no-unknown */
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: #edeadf;
+  background-image: repeating-linear-gradient(
+    180deg,
+    rgba(140, 132, 108, 0.055) 0px,
+    rgba(140, 132, 108, 0.055) 1px,
+    transparent 1px,
+    transparent 34px
+  );
+  color: #161a1e;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Visible keyboard focus, everywhere */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #1f5c46;
+  outline-offset: 2px;
+}
+
+/* A registry row: content separated by a hairline, not a shadowed card */
+.registry-row {
+  border-bottom: 1px solid #c7bfa8;
+}
+.registry-row:first-child {
+  border-top: 1px solid #c7bfa8;
+}
+
+/* A ledger plate: the one bordered container type used for template/entity picks */
+.plate {
+  border: 1px solid #c7bfa8;
+  background: #f6f3e9;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.plate:hover {
+  border-color: #161a1e;
+}
+.plate[data-active="true"] {
+  border-color: #1f5c46;
+  background: #e3eee7;
+}
+
+/* Binding rule down the left of the page shell */
+.binding {
+  border-left: 1px solid #c7bfa8;
+}
+
+.mono-tag {
+  font-family: var(--font-plex-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+}
+
+.field-input {
+  width: 100%;
+  background: #f6f3e9;
+  border: 1px solid #c7bfa8;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.95rem;
+  color: #161a1e;
+  transition: border-color 0.15s ease;
+}
+.field-input:focus {
+  border-color: #1f5c46;
+  outline: none;
+}
+.field-input::placeholder {
+  color: #8c846c;
+}
+
+.btn-primary {
+  background: #161a1e;
+  color: #f6f3e9;
+  padding: 0.7rem 1.25rem;
+  font-size: 0.92rem;
+  border: 1px solid #161a1e;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.btn-primary:hover {
+  background: #f6f3e9;
+  color: #161a1e;
+}
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: #161a1e;
+  padding: 0.7rem 1.25rem;
+  font-size: 0.92rem;
+  border: 1px solid #c7bfa8;
+  transition: border-color 0.15s ease;
+}
+.btn-ghost:hover {
+  border-color: #161a1e;
+}
+
+.cursor-blink::after {
+  content: "|";
+  animation: blink 1s step-end infinite;
+}
