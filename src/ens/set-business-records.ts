@@ -12,14 +12,12 @@
 // Example:
 //   npx tsx src/ens/set-business-records.ts studio
 //
-// Optional World session ID:
+// World session ID is required:
 //   npx tsx src/ens/set-business-records.ts studio WORLD_SESSION_ID
 //
-// NOTE:
-// The Pact spec requires pact:world-verified to eventually contain
-// the World Selfie Check session ID. Until Person C's real World flow
-// is available, this script uses "pending" as a temporary development
-// value. Replace it with the real World session ID later.
+// The backend/frontend integration is expected to pass the real World
+// verification session ID. This script deliberately refuses to write a
+// placeholder value such as "pending".
 
 import {
   encodeFunctionData,
@@ -50,15 +48,15 @@ async function main() {
   // --------------------------------------------------
 
   const slug = process.argv[2]
-  const worldSessionArg = process.argv[3]
+  const worldSessionArg = process.argv[3]?.trim()
 
-  if (!slug) {
+  if (!slug || !worldSessionArg) {
     console.error(
-      'Usage: npx tsx src/ens/set-business-records.ts <slug> [worldSessionId]',
+      'Usage: npx tsx src/ens/set-business-records.ts <slug> <worldSessionId>',
     )
 
     console.error(
-      'Example: npx tsx src/ens/set-business-records.ts studio',
+      'Example: npx tsx src/ens/set-business-records.ts studio 01HXYZ... ',
     )
 
     process.exit(1)
@@ -106,8 +104,7 @@ async function main() {
   // 4. Prepare records
   // --------------------------------------------------
 
-  const worldSessionId =
-    worldSessionArg || 'pending'
+  const worldSessionId = worldSessionArg
 
   const joined =
     new Date().toISOString()

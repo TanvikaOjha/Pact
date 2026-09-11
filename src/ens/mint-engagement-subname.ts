@@ -219,6 +219,7 @@ function labelId(label: string): bigint {
 
 function makeEngagementLabel(
   engagementId: string,
+  suffix?: number,
 ): string {
   const clean = engagementId
     .replace(/^0x/, '')
@@ -230,7 +231,56 @@ function makeEngagementLabel(
     )
   }
 
-  return `eng-${clean.slice(0, 6)}`
+  const base = `eng-${clean.slice(0, 6)}`
+  return suffix && suffix > 1
+    ? `${base}-${suffix}`
+    : base
+}
+
+async function findAvailableEngagementLabel(
+  userRegistry: `0x${string}`,
+  engagementId: string,
+): Promise<string> {
+  // The primary name is intentionally short (6 hex chars), so collisions
+  // are possible. Try deterministic suffixes until an AVAILABLE label is
+  // found. The same resolver salt still uses the full engagementId, so only
+  // the ENS label needs the suffix.
+  const maxAttempts = 100
+
+  for (let suffix = 1; suffix <= maxAttempts; suffix += 1) {
+    const label = makeEngagementLabel(
+      engagementId,
+      suffix,
+    )
+
+    const state =
+      await publicClient.readContract({
+        address: userRegistry,
+        abi: permissionedRegistryAbi,
+        functionName: 'getState',
+        args: [labelId(label)],
+      })
+
+    const status = STATUS[state.status]
+
+    if (status === 'AVAILABLE') {
+      if (suffix === 1) {
+        console.log(
+          `✅ Engagement label available: ${label}.pact-hack.eth`,
+        )
+      } else {
+        console.warn(
+          `⚠️ Base engagement label is occupied. Using fallback: ${label}.pact-hack.eth`,
+        )
+      }
+
+      return label
+    }
+  }
+
+  throw new Error(
+    `Could not find an available engagement label after ${maxAttempts} attempts.`,
+  )
 }
 
 // --------------------------------------------------------------------------
@@ -395,35 +445,8 @@ async function registerEngagement(
     `\n--- Registering ${label}.pact-hack.eth ---`,
   )
 
-  // Check availability.
-  const state =
-    await publicClient.readContract({
-      address: userRegistry,
-      abi: permissionedRegistryAbi,
-      functionName: 'getState',
-      args: [labelId(label)],
-    })
-
-  const status =
-    STATUS[state.status]
-
-  console.log(
-    'Current status:',
-    status,
-  )
-
-  console.log(
-    'Current owner:',
-    state.latestOwner,
-  )
-
-  if (status !== 'AVAILABLE') {
-    throw new Error(
-      `${label}.pact-hack.eth is not available. ` +
-        `Current status: ${status}, owner: ${state.latestOwner}`,
-    )
-  }
-
+  // Availability is checked before resolver deployment in main() so
+  // a short-name collision can fall back to eng-<6hex>-2, -3, etc.
   // Five-year expiry.
   //
   // This is an absolute timestamp, as required by ENSv2.
@@ -658,8 +681,16 @@ async function main() {
   // Derive engagement name.
   // ------------------------------------------------------------------------
 
+  // ------------------------------------------------------------------------
+  // Confirm parent hierarchy and choose an available deterministic label.
+  // ------------------------------------------------------------------------
+
+  const userRegistry =
+    await getBusinessUserRegistry()
+
   const label =
-    makeEngagementLabel(
+    await findAvailableEngagementLabel(
+      userRegistry,
       engagementId,
     )
 
@@ -672,13 +703,6 @@ async function main() {
     'Engagement ENS name:',
     fullName,
   )
-
-  // ------------------------------------------------------------------------
-  // Confirm parent hierarchy.
-  // ------------------------------------------------------------------------
-
-  const userRegistry =
-    await getBusinessUserRegistry()
 
   // ------------------------------------------------------------------------
   // Create Pact-controlled resolver.
