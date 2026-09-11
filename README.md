@@ -4,6 +4,8 @@
 
 Pact is a B2B engagement platform where two businesses propose, commit, and settle work in USDC using one of six contract templates. Terms live on ENS as text records, escrow is enforced on-chain, and every completed engagement writes a permanent, portable reputation record — one that outlives Pact itself.
 
+Built for ETHOnline 2026. Targets three tracks: **ENSv2 Best Use** ($4,500), **Privy B2B Financial Product** ($2,500), **World Selfie Check** ($3,500).
+
 ---
 
 ## The problem
@@ -26,6 +28,35 @@ Pact fixes all three: both parties fund USDC escrow before work starts, terms ar
 4. **Work happens** — Provider submits a completion notice. Counterparty has a configured acceptance window (48h–7 days).
 5. **Release (backend-optional)** — `PactEscrow.releaseMilestone()` is callable directly by the accepting party's wallet. If the window lapses, `autoRelease()` fires instead (callable by anyone, e.g. a Privy session signer). Pact's server is never in the critical path of fund release.
 6. **Reputation** — On completion, `PactCompleted` emits both parties' ENS subnames, template type, value, an `onTime` flag, and a `disputed` flag. This event *is* the reputation record — reproducible by anyone from the block explorer.
+
+```mermaid
+sequenceDiagram
+    participant P as Provider (Party A)
+    participant ENS as ENSv2
+    participant C as Client (Party B)
+    participant Esc as PactEscrow.sol
+    participant W as World Selfie Check
+
+    P->>ENS: Propose — write eng-<hex>.pact.eth terms + terms-hash
+    C->>ENS: "Verify on ENS" — resolve terms live (no backend)
+    P->>Esc: signEngagement()
+    C->>Esc: signEngagement() + fundEngagement() [USDC → escrow]
+    Note over Esc: Engagement ACTIVE
+    P->>Esc: submitCompletion(milestoneIndex)
+    alt milestone ≥ threshold
+        C->>W: Selfie proof (bound to engagement hash)
+        W-->>C: proof
+        C->>Esc: releaseMilestone(id, i, proof)
+    else below threshold
+        C->>Esc: releaseMilestone(id, i, "")
+    else window lapses, no response
+        Note over Esc: anyone (e.g. Privy session signer) calls
+        Esc->>Esc: autoRelease(id, i)
+    end
+    Esc-->>P: USDC released
+    Esc->>ENS: PactCompleted event (on final milestone)
+    Note over ENS: reputation record — permanent, queryable by anyone
+```
 
 ---
 
@@ -55,7 +86,43 @@ Next.js (App Router, TS, Tailwind) ── Privy embedded wallets/session signers
         └── World Selfie Check identity activation + high-value milestone acceptance
 ```
 
-**Design philosophy: backend.** A Node/Express + Supabase backend exists for proposal storage, notifications, and a reputation-events cache — but it mirrors on-chain state and is never required for fund release or terms verification. If Pact's server disappears, `releaseMilestone()`, `autoRelease()`, and ENS resolution keep working.
+```mermaid
+flowchart TB
+    subgraph client["Client"]
+        FE["Next.js Frontend<br/>(App Router · TS · Tailwind)"]
+    end
+
+    subgraph auth["Identity & Auth"]
+        Privy["Privy<br/>embedded wallets · session signers · key quorums"]
+        World["World Selfie Check<br/>identity activation · high-value acceptance"]
+    end
+
+    subgraph chain["Sepolia"]
+        Registry["PactRegistry.sol<br/>business identity · engagement create/sign"]
+        Escrow["PactEscrow.sol<br/>USDC escrow · releaseMilestone · splitRelease · autoRelease"]
+        ENS["ENSv2<br/>&lt;slug&gt;.pact.eth (business)<br/>eng-&lt;hex&gt;.pact.eth (engagement)"]
+    end
+
+    subgraph opt["Backend (optional, cache only)"]
+        BE["Node/Express + Supabase<br/>proposals · notifications · reputation index"]
+    end
+
+    FE -->|"sign in / sign txns"| Privy
+    FE -->|"selfie proof"| World
+    Privy -->|"registerBusiness / signEngagement"| Registry
+    Privy -->|"releaseMilestone (direct, no backend)"| Escrow
+    World -->|"proof written to pact:world-verified"| ENS
+    Registry -->|"mint subname + write terms"| ENS
+    Escrow -->|"PactCompleted event"| ENS
+    FE -->|"resolve terms live<br/>(no backend call)"| ENS
+    BE -.->|"mirrors state, sends emails,<br/>NOT in fund-release path"| Registry
+    BE -.-> Escrow
+    BE -.-> ENS
+
+    style opt stroke-dasharray: 5 5
+```
+
+**Design philosophy: backend-optional.** A Node/Express + Supabase backend exists for proposal storage, notifications, and a reputation-events cache — but it mirrors on-chain state and is never required for fund release or terms verification. If Pact's server disappears, `releaseMilestone()`, `autoRelease()`, and ENS resolution keep working.
 
 ---
 
@@ -123,7 +190,7 @@ npm install
 npm run dev
 ```
 
-Required environment variables (see `.env.example` at repo root):
+Required environment variables:
 
 ```
 SEPOLIA_RPC_URL=
@@ -141,3 +208,4 @@ PACT_REGISTRY_ADDRESS=
 PACT_ESCROW_ADDRESS=
 ```
 
+---
