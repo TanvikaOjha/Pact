@@ -7,6 +7,12 @@ import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
 import type { NewProposal, ProposalStore, StoredProposalTerms } from "../repos/proposals.js";
 import { hashEngagementTerms, type EngagementTermsInput } from "../ens/pact-terms.js";
 import { log } from "../services/log.js";
+import {
+  notifyAll,
+  proposalAcceptedEmail,
+  proposalCreatedEmail,
+  type Notifier,
+} from "../services/notifications.js";
 
 const PROPOSAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -49,6 +55,7 @@ export interface ProposalsRouteOptions {
   ensRoot: string;
   /** Applied to POST only — GET serves the counterparty link, pre-signup. */
   requireAuth: RequestHandler;
+  notify?: Notifier;
 }
 
 function milestoneTotal(milestones: z.infer<typeof milestoneSchema>[]): number {
@@ -143,6 +150,12 @@ async function handleCreate(
     expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS).toISOString(),
   };
   const row = await options.store.insert(proposal);
+  if (options.notify !== undefined) {
+    const email = business.email ?? null;
+    if (email !== null && email !== "") {
+      await notifyAll(options.notify, [email], proposalCreatedEmail(row.token, row.expires_at));
+    }
+  }
   res.status(201).json({ token: row.token, expiresAt: row.expires_at, termsHash: terms.termsHash });
 }
 
@@ -240,6 +253,18 @@ async function handleAccept(
   );
   await options.store.markAccepted(token, engagement.id);
   log.info(`proposal accepted: ${token} -> engagement ${engagement.id}`);
+  if (options.notify !== undefined) {
+    const recipients: string[] = [];
+    const proposerEmail = proposer.email ?? null;
+    if (proposerEmail !== null && proposerEmail !== "") recipients.push(proposerEmail);
+    const counterpartyEmail = counterparty.email ?? null;
+    if (counterpartyEmail !== null && counterpartyEmail !== "") recipients.push(counterpartyEmail);
+    await notifyAll(
+      options.notify,
+      recipients,
+      proposalAcceptedEmail(engagement.ens_subname, counterparty.ens_subname),
+    );
+  }
   res.status(201).json({
     engagementId: engagement.id,
     ensSubname: engagement.ens_subname,

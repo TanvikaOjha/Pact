@@ -198,6 +198,29 @@ export function proposalExpiringEmail(token: string, expiresAt: string): EmailCo
   };
 }
 
+export function proposalCreatedEmail(token: string, expiresAt: string): EmailContent {
+  return {
+    subject: `Proposal created: ${token}`,
+    text: [
+      `Your proposal ${token} expires at ${expiresAt}.`,
+      `The counterparty link view is public; share the token so they can review and accept.`,
+    ].join("\n"),
+  };
+}
+
+export function proposalAcceptedEmail(
+  engagementSubname: string,
+  counterpartySubname: string,
+): EmailContent {
+  return {
+    subject: `Proposal accepted: ${engagementSubname}`,
+    text: [
+      `Your proposal was accepted by ${counterpartySubname} as engagement ${engagementSubname}.`,
+      `On-chain signatures and funding follow.`,
+    ].join("\n"),
+  };
+}
+
 export function disputeStaleEmail(ensSubname: string, name: string | null, index: number): EmailContent {
   return {
     subject: `Stale dispute needs co-signature: ${ensSubname}`,
