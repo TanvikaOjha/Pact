@@ -3,6 +3,7 @@ import { sepolia } from "viem/chains";
 
 import type { BusinessStore } from "../repos/businesses.js";
 import type { NewReputationEvent, ReputationStore } from "../repos/reputation.js";
+import type { IndexerArchive } from "./indexerArchive.js";
 import { log } from "./log.js";
 
 const pactCompletedEvent = parseAbiItem(
@@ -25,6 +26,7 @@ export interface IndexerOptions {
   escrowAddress: string;
   businesses: BusinessStore;
   reputation: ReputationStore;
+  archive?: IndexerArchive;
 }
 
 /**
@@ -36,6 +38,7 @@ export async function recordPactCompleted(
   stores: { businesses: BusinessStore; reputation: ReputationStore },
   decoded: PactCompletedLog,
   emittedAt: string,
+  archive?: IndexerArchive,
 ): Promise<boolean> {
   const [businessA, businessB] = await Promise.all([
     stores.businesses.findByWallet(decoded.partyA),
@@ -43,6 +46,14 @@ export async function recordPactCompleted(
   ]);
   if (businessA === null || businessB === null) {
     log.error(`indexer skipping ${decoded.engagementId}: unknown party wallets`);
+    archive?.archive({
+      reason: "unknown_party_wallets",
+      engagementId: decoded.engagementId,
+      partyA: decoded.partyA,
+      partyB: decoded.partyB,
+      txHash: decoded.txHash,
+      archivedAt: emittedAt,
+    });
     return false;
   }
   const rows: NewReputationEvent[] = [
@@ -76,7 +87,8 @@ export async function recordPactCompleted(
 /**
  * Watch PactCompleted events and mirror them. Returns the unwatch function,
  * or null when unconfigured (callers treat null as "indexer disabled").
- * No backfill: restarts only observe new events.
+ * No backfill: restarts only observe new events. Skips are logged and
+ * archived for ops via options.archive when provided.
  */
 export function startPactCompletedWatcher(options: IndexerOptions): (() => void) | null {
   if (options.rpcUrl === "" || options.escrowAddress === "") {
@@ -105,6 +117,14 @@ export function startPactCompletedWatcher(options: IndexerOptions): (() => void)
             args.disputed === undefined
           ) {
             log.error("indexer skipping log with missing fields");
+            options.archive?.archive({
+              reason: "missing_fields",
+              engagementId: "unknown",
+              partyA: "unknown",
+              partyB: "unknown",
+              txHash: entry.transactionHash ?? null,
+              archivedAt: new Date().toISOString(),
+            });
             continue;
           }
           await recordPactCompleted(
@@ -120,6 +140,7 @@ export function startPactCompletedWatcher(options: IndexerOptions): (() => void)
               txHash: entry.transactionHash ?? null,
             },
             new Date().toISOString(),
+            options.archive,
           );
         }
       })().catch(() => {
