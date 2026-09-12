@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "./interfaces/IERC20.sol";
 import {PactRegistry} from "./PactRegistry.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /// @notice Minimal score-tier read. PactScore lands later; escrow only needs the tier.
 interface IPactScore {
@@ -29,6 +30,9 @@ contract PactEscrow {
         bool funded;
         bool everDisputed;       // sticky flag for the reputation record — true if ANY milestone was ever disputed
         bool completedEmitted;   // guards against emitting PactCompleted twice
+        uint8 fundedCount;       // M2: number of leading funded milestones (prefix length)
+        uint256 fundedTotal;     // M2: sum of funded milestone amounts actually escrowed
+        bool defaulted;          // M2: true once recordDefault fires for the first unfunded tranche
     }
 
     /// @notice M4 executable terms committed per milestone at funding.
@@ -74,6 +78,14 @@ contract PactEscrow {
         bool challenged;
     }
 
+    /// @notice M6 record-only attestation per milestone.
+    struct Attestation {
+        address attestor;
+        bytes32 evidenceHash;
+        bool verdict;
+        uint256 at;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Storage
     // ─────────────────────────────────────────────────────────────────────────
@@ -93,6 +105,10 @@ contract PactEscrow {
     mapping(bytes32 => mapping(uint256 => bool)) public worldAttested;
     mapping(bytes32 => Bond) public bonds;
     mapping(bytes32 => mapping(uint256 => DisputeState)) public disputeStates;
+    /// @notice M5 pull-payment fallback: engagementId => recipient => claimable amount.
+    mapping(bytes32 => mapping(address => uint256)) public pendingShares;
+    /// @notice M6 record-only attestations: engagementId => milestoneIndex => records.
+    mapping(bytes32 => mapping(uint256 => Attestation[])) private _attestations;
 
     /// @notice M1 bond size by score tier: 10% / 7% / 5% / 2% (bps).
     /// Array constants are not supported by Solidity, so this pure getter
@@ -136,6 +152,13 @@ contract PactEscrow {
     event ResolutionChallenged(bytes32 indexed engagementId, uint256 milestoneIndex, address challenger);
     event ResolutionExecuted(
         bytes32 indexed engagementId, uint256 milestoneIndex, uint256 providerAmount, uint256 clientRefund, bool challenged
+    );
+    event TopUpFunded(bytes32 indexed engagementId, uint256 startIndex, uint256 count);
+    event DefaultRecorded(bytes32 indexed engagementId);
+    event SplitReleased(bytes32 indexed engagementId, uint256 total);
+    event ShareClaimed(bytes32 indexed engagementId, address indexed recipient, uint256 amount);
+    event CompletionAttested(
+        bytes32 indexed engagementId, uint256 milestoneIndex, address indexed attestor, bytes32 evidenceHash, bool verdict
     );
 
     /// @notice The reputation record. Anyone can filter this event by subname to
@@ -182,6 +205,10 @@ contract PactEscrow {
     error BondAlreadyPosted();
     error NotProposer();
     error CannotChallengeOwnProposal();
+    error InsufficientFunding();
+    error MilestoneUnfunded();
+    error NothingToClaim();
+    error AlreadyDefaulted();
 
     modifier onlyAdmin() {
         if (msg.sender != admin) revert OnlyAdmin();
@@ -220,10 +247,15 @@ contract PactEscrow {
         scoreContract = newScoreContract;
     }
 
-    /// @notice Score tier of a provider wallet. 0 when no score contract is wired.
-    function _providerTier(address wallet) internal view returns (uint8) {
+    /// @notice Score tier of a wallet. 0 when no score contract is wired.
+    function _tierOf(address wallet) internal view returns (uint8) {
         if (scoreContract == address(0)) return 0;
         return IPactScore(scoreContract).getTier(registry.getBusiness(wallet).ensSubname);
+    }
+
+    /// @notice Backwards-compatible alias kept for the M1 bond path.
+    function _providerTier(address wallet) internal view returns (uint8) {
+        return _tierOf(wallet);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -254,11 +286,14 @@ contract PactEscrow {
             if (terms[i].visibility > 1) revert BadVisibility();
         }
 
-        uint256 sum;
-        for (uint256 i = 0; i < milestoneAmounts.length; i++) {
-            sum += milestoneAmounts[i];
+        // M2: amounts must be a nonzero PREFIX of the milestone schedule.
+        (uint256 fundedCount, uint256 prefixSum) = _fundingPrefix(milestoneAmounts, e.totalAmount);
+
+        {
+            uint8 clientTier = _tierOf(msg.sender);
+            uint256 floor = (e.totalAmount * (clientTier >= 2 ? 5000 : 10_000)) / 10_000;
+            if (prefixSum < floor) revert InsufficientFunding();
         }
-        if (sum != e.totalAmount) revert AmountsMismatch();
 
         address provider = msg.sender == e.partyA ? e.partyB : e.partyA;
 
@@ -266,35 +301,111 @@ contract PactEscrow {
         Bond storage existingBond = bonds[engagementId];
         if (!existingBond.posted || existingBond.bonder != provider) revert BondNotPosted();
 
-        escrows[engagementId] = EscrowInfo({
-            client: msg.sender,
-            provider: provider,
-            totalAmount: e.totalAmount,
-            milestoneCount: uint8(milestoneAmounts.length),
-            funded: true,
-            everDisputed: false,
-            completedEmitted: false
-        });
+        EscrowInfo storage info = escrows[engagementId];
+        info.client = msg.sender;
+        info.provider = provider;
+        info.totalAmount = e.totalAmount;
+        info.milestoneCount = uint8(milestoneAmounts.length);
+        info.funded = true;
+        info.everDisputed = false;
+        info.completedEmitted = false;
+        info.fundedCount = uint8(fundedCount);
+        info.fundedTotal = prefixSum;
+        info.defaulted = false;
 
-        for (uint256 i = 0; i < milestoneAmounts.length; i++) {
-            milestones[engagementId][i] = Milestone({
-                amount: milestoneAmounts[i],
-                submitted: false,
-                submittedAt: 0,
-                releaseAfter: 0,
-                released: false,
-                disputed: false,
-                evidenceHash: bytes32(0),
-                late: false
-            });
+        _storeMilestones(engagementId, milestoneAmounts, terms);
+
+        bool ok = usdc.transferFrom(msg.sender, address(this), prefixSum);
+        if (!ok) revert TransferFailed();
+
+        emit EngagementFunded(engagementId, msg.sender, provider, prefixSum, milestoneAmounts.length);
+    }
+
+    /// @dev M2 prefix validation: k >= 1 leading nonzero entries, rest zero.
+    function _fundingPrefix(uint256[] calldata amounts, uint256 totalAmount)
+        internal
+        pure
+        returns (uint256 fundedCount, uint256 prefixSum)
+    {
+        bool seenZero = false;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            uint256 amt = amounts[i];
+            if (amt > 0) {
+                if (seenZero) revert AmountsMismatch();
+                fundedCount += 1;
+                prefixSum += amt;
+            } else {
+                seenZero = true;
+            }
+        }
+        if (fundedCount == 0) revert AmountsMismatch();
+        if (prefixSum > totalAmount) revert AmountsMismatch();
+    }
+
+    /// @dev Writes milestone slots + terms without holding struct literals on the caller stack.
+    function _storeMilestones(
+        bytes32 engagementId,
+        uint256[] calldata amounts,
+        MilestoneTerms[] calldata terms
+    ) internal {
+        for (uint256 i = 0; i < amounts.length; i++) {
+            Milestone storage ms = milestones[engagementId][i];
+            ms.amount = amounts[i];
+            ms.submitted = false;
+            ms.submittedAt = 0;
+            ms.releaseAfter = 0;
+            ms.released = false;
+            ms.disputed = false;
+            ms.evidenceHash = bytes32(0);
+            ms.late = false;
             milestoneTerms[engagementId][i] = terms[i];
             emit TermsCommitted(engagementId, i);
         }
+    }
 
-        bool ok = usdc.transferFrom(msg.sender, address(this), e.totalAmount);
+    /// @notice M2 top-up for the next unfunded tranches. `startIndex` must equal
+    /// the current fundedCount; every amount must be nonzero; the new funded
+    /// total may not exceed the engagement total.
+    function topUp(bytes32 engagementId, uint256 startIndex, uint256[] calldata amounts) external {
+        EscrowInfo storage info = escrows[engagementId];
+        if (!info.funded) revert NotFunded();
+        if (startIndex != info.fundedCount) revert AmountsMismatch();
+        if (amounts.length == 0) revert AmountsMismatch();
+        if (startIndex + amounts.length > info.milestoneCount) revert AmountsMismatch();
+
+        uint256 sum;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            if (amounts[i] == 0) revert AmountsMismatch();
+            sum += amounts[i];
+        }
+        uint256 newFundedTotal = info.fundedTotal + sum;
+        if (newFundedTotal > info.totalAmount) revert AmountsMismatch();
+
+        bool ok = usdc.transferFrom(msg.sender, address(this), sum);
         if (!ok) revert TransferFailed();
 
-        emit EngagementFunded(engagementId, msg.sender, provider, e.totalAmount, milestoneAmounts.length);
+        for (uint256 i = 0; i < amounts.length; i++) {
+            milestones[engagementId][startIndex + i].amount = amounts[i];
+        }
+        info.fundedCount = uint8(uint256(info.fundedCount) + amounts.length);
+        info.fundedTotal = newFundedTotal;
+
+        emit TopUpFunded(engagementId, startIndex, amounts.length);
+    }
+
+    /// @notice M2 default flag for an unfunded tranche past its deadline+grace.
+    /// Callable by anyone; record-only (never taints provider onTime).
+    function recordDefault(bytes32 engagementId) external {
+        EscrowInfo storage info = escrows[engagementId];
+        if (!info.funded) revert NotFunded();
+        if (info.defaulted) revert AlreadyDefaulted();
+        if (uint256(info.fundedCount) >= uint256(info.milestoneCount)) revert MilestoneUnfunded();
+
+        MilestoneTerms storage t = milestoneTerms[engagementId][info.fundedCount];
+        if (t.deadline == 0 || block.timestamp <= t.deadline + t.graceSeconds) revert WindowNotClosed();
+
+        info.defaulted = true;
+        emit DefaultRecorded(engagementId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -345,7 +456,7 @@ contract PactEscrow {
             }
         }
 
-        for (uint256 i = 0; i < info.milestoneCount; i++) {
+        for (uint256 i = 0; i < info.fundedCount; i++) {
             if (!milestones[engagementId][i].released) return;
         }
 
@@ -368,6 +479,7 @@ contract PactEscrow {
         EscrowInfo storage info = escrows[engagementId];
         if (!info.funded) revert NotFunded();
         if (msg.sender != info.provider) revert NotProvider();
+        if (milestoneIndex >= info.fundedCount) revert MilestoneUnfunded();
 
         Milestone storage m = milestones[engagementId][milestoneIndex];
         if (m.submitted) revert MilestoneAlreadySubmitted();
@@ -472,6 +584,100 @@ contract PactEscrow {
         emit MilestoneReleased(engagementId, 0, m.amount);
         _settleBond(engagementId, info, 0);
         _finalizeIfComplete(engagementId, info);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // M5 N-party splits with pull-payment fallback
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @notice M5 N-way fan-out for milestone 0. Per-recipient try/catch: a
+    /// failing receiver is credited to pendingShares instead of bricking the
+    /// whole split; last recipient takes the remainder dust.
+    function releaseSplit(
+        bytes32 engagementId,
+        address[] calldata recipients,
+        uint16[] calldata sharesBps
+    ) external {
+        EscrowInfo storage info = escrows[engagementId];
+        if (!info.funded) revert NotFunded();
+        if (msg.sender != info.client) revert NotClient();
+        if (recipients.length != sharesBps.length || recipients.length == 0) revert BadShare();
+
+        uint256 totalBps;
+        for (uint256 i = 0; i < sharesBps.length; i++) {
+            totalBps += sharesBps[i];
+        }
+        if (totalBps != 10_000) revert BadShare();
+
+        Milestone storage m = milestones[engagementId][0];
+        if (!m.submitted) revert MilestoneNotSubmitted();
+        if (m.released) revert MilestoneAlreadyReleased();
+        if (m.disputed) revert MilestoneDisputedErr();
+
+        if (m.amount >= highValueThreshold) {
+            if (!worldAttested[engagementId][0]) revert WorldVerificationRequired();
+        }
+
+        uint256 total = m.amount;
+        uint256 distributed;
+        m.released = true;
+
+        for (uint256 i = 0; i < recipients.length; i++) {
+            uint256 amt;
+            if (i == recipients.length - 1) {
+                amt = total - distributed;
+            } else {
+                amt = (total * sharesBps[i]) / 10_000;
+                distributed += amt;
+            }
+            if (amt == 0) continue;
+            try usdc.transfer(recipients[i], amt) returns (bool ok) {
+                if (!ok) {
+                    pendingShares[engagementId][recipients[i]] += amt;
+                }
+            } catch {
+                pendingShares[engagementId][recipients[i]] += amt;
+            }
+        }
+
+        emit SplitReleased(engagementId, total);
+        _settleBond(engagementId, info, 0);
+        _finalizeIfComplete(engagementId, info);
+    }
+
+    /// @notice M5 claim fallback for a failed split recipient. Pullable indefinitely.
+    function claimShare(bytes32 engagementId) external {
+        uint256 amt = pendingShares[engagementId][msg.sender];
+        if (amt == 0) revert NothingToClaim();
+        pendingShares[engagementId][msg.sender] = 0;
+        bool ok = usdc.transfer(msg.sender, amt);
+        if (!ok) revert TransferFailed();
+        emit ShareClaimed(engagementId, msg.sender, amt);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // M6 attestations (record-only)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @notice M6 record-only attestation. Open to anyone; never read by release paths.
+    function attestCompletion(
+        bytes32 engagementId,
+        uint256 milestoneIndex,
+        bytes32 evidenceHash,
+        bool verdict
+    ) external {
+        _attestations[engagementId][milestoneIndex].push(
+            Attestation({attestor: msg.sender, evidenceHash: evidenceHash, verdict: verdict, at: block.timestamp})
+        );
+        emit CompletionAttested(engagementId, milestoneIndex, msg.sender, evidenceHash, verdict);
+    }
+
+    function getAttestations(bytes32 engagementId, uint256 milestoneIndex)
+        external
+        view
+        returns (Attestation[] memory)
+    {
+        return _attestations[engagementId][milestoneIndex];
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -668,9 +874,10 @@ contract PactEscrow {
 
     function _finalizeIfComplete(bytes32 engagementId, EscrowInfo storage info) internal {
         if (info.completedEmitted) return;
+        if (info.fundedCount == 0) return;
 
-        for (uint256 i = 0; i < info.milestoneCount; i++) {
-            if (!milestones[engagementId][i].released) return; // not all done yet
+        for (uint256 i = 0; i < info.fundedCount; i++) {
+            if (!milestones[engagementId][i].released) return; // not all funded done yet
         }
 
         info.completedEmitted = true;
@@ -681,9 +888,10 @@ contract PactEscrow {
 
         // M4 on-time definition: no dispute ever raised AND no milestone submitted late
         // (late = submitted past deadline + grace, flagged at submitCompletion).
+        // M2: default does NOT taint provider onTime; only funded milestones count.
         bool onTime = !info.everDisputed;
         if (onTime) {
-            for (uint256 i = 0; i < info.milestoneCount; i++) {
+            for (uint256 i = 0; i < info.fundedCount; i++) {
                 if (milestones[engagementId][i].late) {
                     onTime = false;
                     break;
@@ -691,14 +899,23 @@ contract PactEscrow {
             }
         }
 
+        // M6: engagement visibility = terms[0]. Commit mode emits keccak-hex of
+        // each subname (66-char 0x-hex) instead of plaintext.
+        string memory subA = bizA.ensSubname;
+        string memory subB = bizB.ensSubname;
+        if (milestoneTerms[engagementId][0].visibility == 1) {
+            subA = Strings.toHexString(uint256(keccak256(bytes(subA))), 32);
+            subB = Strings.toHexString(uint256(keccak256(bytes(subB))), 32);
+        }
+
         emit PactCompleted(
             engagementId,
             e.partyA,
-            bizA.ensSubname,
+            subA,
             e.partyB,
-            bizB.ensSubname,
+            subB,
             e.templateType,
-            info.totalAmount,
+            info.fundedTotal,
             onTime,
             info.everDisputed
         );
