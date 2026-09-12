@@ -152,6 +152,9 @@ export function createApp() {
       reputation: createSupabaseReputationStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+      engagements: createSupabaseEngagementStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
     }),
   );
   apiRouter.use(

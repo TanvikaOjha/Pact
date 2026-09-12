@@ -29,6 +29,7 @@ import type {
 import { createDisputesRouter } from "./disputes.js";
 import { createEngagementsRouter } from "./engagements.js";
 import { createReputationRouter } from "./reputation.js";
+import { scoreForEvents, tierForScore } from "../services/reputation.js";
 
 const WALLET_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WALLET_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -84,6 +85,9 @@ function createStores() {
         status: "PROPOSED",
         created_at: new Date().toISOString(),
         completed_at: null,
+        visibility: engagement.visibility ?? "public",
+        default_provider_bps: engagement.defaultProviderBps ?? null,
+        challenge_window_seconds: engagement.challengeWindowSeconds ?? null,
       };
       engagements.push(row);
       return row;
@@ -239,12 +243,16 @@ interface ReputationEnvelope {
   totalValue?: number;
   onTimeRate?: number | null;
   disputeCount?: number;
+  score?: number;
+  tier?: number;
+  scoreVersion?: number;
   recent?: Array<{
     templateType?: number;
     totalValue?: number;
     onTime?: boolean;
     disputed?: boolean;
     counterpartySubname?: string | null;
+    redacted?: boolean;
   }>;
   engagementId?: string;
   id?: string;
@@ -266,7 +274,7 @@ async function api(
   return { status: res.status, body };
 }
 
-function engagementDraft(onChainId: string): string {
+function engagementDraft(onChainId: string, visibility = "public"): string {
   return JSON.stringify({
     counterpartyWallet: WALLET_B,
     templateType: 1,
@@ -275,6 +283,7 @@ function engagementDraft(onChainId: string): string {
     onChainId,
     ensSubname: `eng-${onChainId}.pact-hack.eth`,
     milestones: [{ index: 0, name: "Work", description: "Done", amount: 2000, dueDate: "2026-10-15" }],
+    visibility,
   });
 }
 
@@ -325,6 +334,7 @@ describe("reputation", () => {
       createReputationRouter({
         businesses: stores.businessStore,
         reputation: stores.reputationStore,
+        engagements: stores.engagementStore,
       }),
     );
     await new Promise<void>((resolve) => {
@@ -396,5 +406,76 @@ describe("reputation", () => {
   test("unknown subnames 404", async () => {
     const missing = await api(port, "GET", "/api/businesses/ghost.pact-hack.eth/reputation", null);
     expect(missing.status).toBe(404);
+  });
+
+  test("commit-visibility engagements redact the counterparty", async () => {
+    const created = await api(
+      port,
+      "POST",
+      "/api/engagements",
+      WALLET_A,
+      engagementDraft("offchain-rep-commit", "commit"),
+    );
+    const id = created.body.id ?? "";
+    await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+    const released = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_B);
+    expect(released.body.engagementCompleted).toBe(true);
+
+    const profile = await api(port, "GET", "/api/businesses/studio.pact-hack.eth/reputation", null);
+    const entry = profile.body.recent?.find((item) => item.totalValue === 2000 && item.redacted === true);
+    expect(entry?.counterpartySubname).toBeNull();
+    const open = profile.body.recent?.find((item) => item.redacted === false);
+    expect(open?.counterpartySubname).not.toBeNull();
+  });
+});
+
+describe("pact score", () => {
+  function scoredEvent(totalValue: number, onTime: boolean, disputed: boolean): ReputationEventRow {
+    return {
+      id: "rep-x",
+      engagement_id: "eng-x",
+      business_id: "biz-a",
+      counterparty_id: "biz-b",
+      template_type: 1,
+      total_value: totalValue,
+      on_time: onTime,
+      disputed,
+      tx_hash: null,
+      emitted_at: new Date().toISOString(),
+    };
+  }
+
+  test("empty history scores zero in tier zero", () => {
+    expect(scoreForEvents([], true)).toEqual({ score: 50, tier: 0, version: 1 });
+  });
+
+  test("three clean engagements clear tier zero", () => {
+    const events = [
+      scoredEvent(2000, true, false),
+      scoredEvent(2000, true, false),
+      scoredEvent(2000, true, false),
+    ];
+    // 120 count + 24 value + 200 punctuality + 50 world = 394 → tier 1.
+    expect(scoreForEvents(events, true)).toEqual({ score: 394, tier: 1, version: 1 });
+  });
+
+  test("disputes drag the score down", () => {
+    const events = [
+      scoredEvent(2000, true, false),
+      scoredEvent(2000, false, true),
+      scoredEvent(2000, false, true),
+    ];
+    // 120 + 24 + 67 − 100 + 50 = 161 → tier 0.
+    expect(scoreForEvents(events, true)).toEqual({ score: 161, tier: 0, version: 1 });
+  });
+
+  test("tier boundaries hold at any depth", () => {
+    expect(tierForScore(199, 10)).toBe(0);
+    expect(tierForScore(200, 10)).toBe(1);
+    expect(tierForScore(549, 10)).toBe(1);
+    expect(tierForScore(550, 10)).toBe(2);
+    expect(tierForScore(799, 10)).toBe(2);
+    expect(tierForScore(800, 10)).toBe(3);
+    expect(tierForScore(1000, 2)).toBe(0);
   });
 });
