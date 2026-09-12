@@ -42,9 +42,9 @@ export default function RootLayout({
         <AuthProvider>
           <ToastProvider>
             <Nav />
-            <main className="max-w-5xl mx-auto px-6 pb-24">{children}</main>
+            <main className="max-w-3xl mx-auto px-6 pb-24">{children}</main>
             <footer className="border-t border-line">
-              <div className="max-w-5xl mx-auto px-6 py-10 flex flex-wrap gap-x-8 gap-y-2 text-sm text-ink-mute">
+              <div className="max-w-3xl mx-auto px-6 py-10 flex flex-wrap gap-x-8 gap-y-2 text-sm text-ink-mute">
                 <span className="font-mono text-xs uppercase tracking-wider">Pact</span>
                 <span>Your contract is an ENS name. Your reputation is an event log.</span>
                 <span className="ml-auto font-mono text-xs">sepolia · usdc · ensv2</span>
