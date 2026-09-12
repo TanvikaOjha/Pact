@@ -295,3 +295,79 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
     },
   };
 }
+
+export interface BondRow {
+  engagement_id: string;
+  amount: number;
+  bonder_wallet: string;
+  posted_at: string;
+  frozen: boolean;
+  settled_at: string | null;
+  slashed_amount: number;
+}
+
+export interface NewBond {
+  engagementId: string;
+  amount: number;
+  bonderWallet: string;
+}
+
+export interface BondStore {
+  findByEngagement(engagementId: string): Promise<BondRow | null>;
+  recordPosted(row: NewBond): Promise<BondRow>;
+  setFrozen(engagementId: string, frozen: boolean): Promise<void>;
+  recordReturned(engagementId: string, settledAt: string): Promise<void>;
+  recordSlashed(engagementId: string, slashedAmount: number): Promise<void>;
+}
+
+/** Mirror of on-chain bond state (see PactEscrow BondPosted/Returned/Slashed/Frozen). */
+export function createSupabaseBondStore(client: SupabaseClient): BondStore {
+  return {
+    async findByEngagement(engagementId: string): Promise<BondRow | null> {
+      const result = await client
+        .from("bonds")
+        .select("*")
+        .eq("engagement_id", engagementId)
+        .limit(1)
+        .returns<BondRow[]>();
+      if (result.error) throw new Error(`bond lookup failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async recordPosted(row: NewBond): Promise<BondRow> {
+      const result = await client
+        .from("bonds")
+        .insert({
+          engagement_id: row.engagementId,
+          amount: row.amount,
+          bonder_wallet: row.bonderWallet,
+        })
+        .select()
+        .returns<BondRow[]>();
+      if (result.error) throw new Error(`bond insert failed: ${result.error.message}`);
+      const created = firstRow(result.data);
+      if (created === null) throw new Error("bond insert returned no row");
+      return created;
+    },
+    async setFrozen(engagementId: string, frozen: boolean): Promise<void> {
+      const result = await client
+        .from("bonds")
+        .update({ frozen })
+        .eq("engagement_id", engagementId);
+      if (result.error) throw new Error(`bond update failed: ${result.error.message}`);
+    },
+    async recordReturned(engagementId: string, settledAt: string): Promise<void> {
+      const result = await client
+        .from("bonds")
+        .update({ settled_at: settledAt })
+        .eq("engagement_id", engagementId);
+      if (result.error) throw new Error(`bond update failed: ${result.error.message}`);
+    },
+    async recordSlashed(engagementId: string, slashedAmount: number): Promise<void> {
+      const result = await client
+        .from("bonds")
+        .update({ slashed_amount: slashedAmount })
+        .eq("engagement_id", engagementId);
+      if (result.error) throw new Error(`bond update failed: ${result.error.message}`);
+    },
+  };
+}

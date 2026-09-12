@@ -1,12 +1,30 @@
 import { createPublicClient, http, isAddress, parseAbiItem } from "viem";
 import { sepolia } from "viem/chains";
+import { z } from "zod";
 
 import type { BusinessStore } from "../repos/businesses.js";
+import type { BondStore } from "../repos/engagements.js";
 import type { NewReputationEvent, ReputationStore } from "../repos/reputation.js";
 import { log } from "./log.js";
 
 const pactCompletedEvent = parseAbiItem(
   "event PactCompleted(bytes32 indexed engagementId, address indexed partyA, string subnameA, address indexed partyB, string subnameB, uint8 templateType, uint256 totalValue, bool onTime, bool disputed)",
+);
+
+const bondPostedEvent = parseAbiItem(
+  "event BondPosted(bytes32 indexed engagementId, address indexed bonder, uint256 amount)",
+);
+
+const bondReturnedEvent = parseAbiItem(
+  "event BondReturned(bytes32 indexed engagementId, address indexed provider, uint256 amount)",
+);
+
+const bondSlashedEvent = parseAbiItem(
+  "event BondSlashed(bytes32 indexed engagementId, uint256 amount)",
+);
+
+const bondFrozenEvent = parseAbiItem(
+  "event BondFrozen(bytes32 indexed engagementId)",
 );
 
 export interface PactCompletedLog {
@@ -56,7 +74,76 @@ export interface IndexerOptions {
   escrowAddress: string;
   businesses: BusinessStore;
   reputation: ReputationStore;
+  bonds: BondStore;
   archive?: IndexerArchive;
+}
+
+export interface BondEventDecoded {
+  engagementId: string;
+  bonder: string;
+  provider: string;
+  amount: number;
+}
+
+export interface BondEventStores {
+  bonds: BondStore;
+}
+
+/** Boundary decode for bond logs; amounts arrive as bigint from viem. */
+const bondLogSchema = z.object({
+  eventName: z.string(),
+  args: z
+    .object({
+      engagementId: z.string(),
+      bonder: z.string().optional(),
+      provider: z.string().optional(),
+      amount: z.union([z.bigint(), z.number()]).optional(),
+    })
+    .passthrough(),
+});
+
+function bondKindForEvent(eventName: string): string | null {
+  if (eventName === "BondPosted") return "posted";
+  if (eventName === "BondReturned") return "returned";
+  if (eventName === "BondSlashed") return "slashed";
+  if (eventName === "BondFrozen") return "frozen";
+  return null;
+}
+
+/**
+ * Map a decoded bond event to mirror writes. Pure: unit-tested without a chain.
+ * Slashes accumulate on-chain burns: recordSlashed stores the cumulative total,
+ * so the decoded amount is added to the existing row before writing.
+ */
+export async function recordBondEvent(
+  stores: BondEventStores,
+  kind: string,
+  decoded: BondEventDecoded,
+  at: string,
+): Promise<void> {
+  if (kind === "posted") {
+    await stores.bonds.recordPosted({
+      engagementId: decoded.engagementId,
+      amount: decoded.amount,
+      bonderWallet: decoded.bonder,
+    });
+    return;
+  }
+  if (kind === "returned") {
+    await stores.bonds.recordReturned(decoded.engagementId, at);
+    return;
+  }
+  if (kind === "slashed") {
+    const existing = await stores.bonds.findByEngagement(decoded.engagementId);
+    const cumulative = (existing === null ? 0 : existing.slashed_amount) + decoded.amount;
+    await stores.bonds.recordSlashed(decoded.engagementId, cumulative);
+    return;
+  }
+  if (kind === "frozen") {
+    await stores.bonds.setFrozen(decoded.engagementId, true);
+    return;
+  }
+  log.error(`indexer skipping bond event with unknown kind ${kind}`);
 }
 
 /**
@@ -119,6 +206,9 @@ export async function recordPactCompleted(
  * or null when unconfigured (callers treat null as "indexer disabled").
  * No backfill: restarts only observe new events. Skips are logged and
  * archived for ops via options.archive when provided.
+ *
+ * Bond events (BondPosted/Returned/Slashed/Frozen) ride a second watcher on
+ * the same escrow with the same disabled-when-unconfigured semantics.
  */
 export function startPactCompletedWatcher(options: IndexerOptions): (() => void) | null {
   if (options.rpcUrl === "" || options.escrowAddress === "") {
@@ -178,5 +268,59 @@ export function startPactCompletedWatcher(options: IndexerOptions): (() => void)
       });
     },
   });
-  return unwatch;
+  const unwatchBonds = client.watchContractEvent({
+    address: options.escrowAddress,
+    abi: [bondPostedEvent, bondReturnedEvent, bondSlashedEvent, bondFrozenEvent],
+    onLogs: (logs) => {
+      void (async () => {
+        for (const entry of logs) {
+          const parsed = bondLogSchema.safeParse(entry);
+          const txHash = entry.transactionHash ?? null;
+          if (!parsed.success) {
+            log.error("indexer skipping bond log with missing fields");
+            options.archive?.archive({
+              reason: "bond_fields_missing",
+              engagementId: "unknown",
+              partyA: "unknown",
+              partyB: "unknown",
+              txHash,
+              archivedAt: new Date().toISOString(),
+            });
+            continue;
+          }
+          const kind = bondKindForEvent(parsed.data.eventName);
+          if (kind === null) {
+            log.error("indexer skipping bond log with missing fields");
+            options.archive?.archive({
+              reason: "bond_fields_missing",
+              engagementId: parsed.data.args.engagementId,
+              partyA: parsed.data.args.bonder ?? "unknown",
+              partyB: parsed.data.args.provider ?? "unknown",
+              txHash,
+              archivedAt: new Date().toISOString(),
+            });
+            continue;
+          }
+          const bondArgs = parsed.data.args;
+          await recordBondEvent(
+            { bonds: options.bonds },
+            kind,
+            {
+              engagementId: bondArgs.engagementId,
+              bonder: bondArgs.bonder ?? "unknown",
+              provider: bondArgs.provider ?? "unknown",
+              amount: bondArgs.amount === undefined ? 0 : Number(bondArgs.amount),
+            },
+            new Date().toISOString(),
+          );
+        }
+      })().catch(() => {
+        log.error("indexer bond batch failed");
+      });
+    },
+  });
+  return () => {
+    unwatch();
+    unwatchBonds();
+  };
 }

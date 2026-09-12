@@ -4,7 +4,14 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import type { BusinessRow, BusinessStore } from "../repos/businesses.js";
-import type { DisputeVoteRow, DisputeVoteStore, NewDisputeVote } from "../repos/disputes.js";
+import type {
+  DisputeProposalRow,
+  DisputeProposalStore,
+  DisputeVoteRow,
+  DisputeVoteStore,
+  NewDisputeProposal,
+  NewDisputeVote,
+} from "../repos/disputes.js";
 import type {
   EngagementRow,
   EngagementStatus,
@@ -177,6 +184,31 @@ function createStores() {
     hasVotesForEngagement: async (engagementId: string) =>
       votes.some((vote) => vote.engagement_id === engagementId),
   };
+  const proposals: DisputeProposalRow[] = [];
+  const proposalStore: DisputeProposalStore = {
+    findProposal: async (engagementId: string, milestoneIndex: number) =>
+      proposals.find(
+        (proposal) =>
+          proposal.engagement_id === engagementId && proposal.milestone_index === milestoneIndex,
+      ) ?? null,
+    upsertProposal: async (row: NewDisputeProposal) => {
+      const created: DisputeProposalRow = {
+        engagement_id: row.engagementId,
+        milestone_index: row.milestoneIndex,
+        provider_amount: row.providerAmount,
+        client_refund: row.clientRefund,
+        proposer_wallet: row.proposerWallet,
+        challenge_deadline: row.challengeDeadline,
+        challenged: false,
+        executed_at: null,
+      };
+      proposals.push(created);
+      return created;
+    },
+    markChallenged: async () => {},
+    markExecuted: async () => {},
+    listOpen: async () => proposals.filter((proposal) => proposal.executed_at === null),
+  };
   const reputationStore: ReputationStore = {
     recordCompletion: async (entries: NewReputationEvent[]) => {
       for (const entry of entries) {
@@ -197,7 +229,7 @@ function createStores() {
     eventsForBusiness: async (businessId: string) =>
       events.filter((event) => event.business_id === businessId),
   };
-  return { businessStore, engagementStore, milestoneStore, voteStore, reputationStore };
+  return { businessStore, engagementStore, milestoneStore, voteStore, proposalStore, reputationStore };
 }
 
 interface ReputationEnvelope {
@@ -282,6 +314,7 @@ describe("reputation", () => {
         milestones: stores.milestoneStore,
         businesses: stores.businessStore,
         votes: stores.voteStore,
+        proposals: stores.proposalStore,
         reputation: stores.reputationStore,
         notify: { send: async () => {} },
         checkDisputed: null,

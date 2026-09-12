@@ -1,7 +1,15 @@
 import type { BusinessStore } from "../repos/businesses.js";
 import type { EngagementStore, MilestoneRow, MilestoneStore } from "../repos/engagements.js";
+import type { DisputeProposalRow } from "../repos/disputes.js";
 import { log } from "./log.js";
-import { notifyAll, recipientEmails, releaseDueEmail, windowClosingEmail, type Notifier } from "./notifications.js";
+import {
+  challengeClosingEmail,
+  notifyAll,
+  recipientEmails,
+  releaseDueEmail,
+  windowClosingEmail,
+  type Notifier,
+} from "./notifications.js";
 
 /** Default acceptance window (spec Q2 default). Per-engagement terms override later. */
 export const ACCEPTANCE_WINDOW_HOURS = 48;
@@ -110,6 +118,7 @@ export interface SweepDeps {
   businesses: BusinessStore;
   notify: Notifier;
   requestAutoRelease?: AutoReleaseHandler;
+  proposals?: { listOpen(): Promise<DisputeProposalRow[]> };
 }
 
 export interface AutoReleaseSummary {
@@ -123,6 +132,21 @@ export interface SweepResult {
   due: DueRelease[];
   closingSoon: number;
   autoRelease: AutoReleaseSummary;
+  challengeClosing: number;
+}
+
+/** Open proposals whose challenge deadline falls within the closing horizon. */
+export function findClosingChallenges(proposals: DisputeProposalRow[], now: string): DisputeProposalRow[] {
+  const nowMs = Date.parse(now);
+  const closing: DisputeProposalRow[] = [];
+  for (const proposal of proposals) {
+    if (proposal.executed_at !== null) continue;
+    const deadlineMs = Date.parse(proposal.challenge_deadline);
+    if (deadlineMs > nowMs && deadlineMs - nowMs <= CLOSING_SOON_MS) {
+      closing.push(proposal);
+    }
+  }
+  return closing;
 }
 
 /**
@@ -140,7 +164,8 @@ export async function runSweep(deps: SweepDeps): Promise<SweepResult> {
   await notifyDueParties(deps, due);
   await notifyClosingParties(deps, closing);
   const autoRelease = await attemptAutoReleases(deps, due);
-  return { checkedAt, due, closingSoon: closing.length, autoRelease };
+  const challengeClosing = await notifyClosingChallenges(deps, checkedAt);
+  return { checkedAt, due, closingSoon: closing.length, autoRelease, challengeClosing };
 }
 
 async function attemptAutoReleases(deps: SweepDeps, due: DueRelease[]): Promise<AutoReleaseSummary> {
@@ -202,4 +227,28 @@ async function notifyClosingParties(deps: SweepDeps, closing: DueRelease[]): Pro
       ),
     );
   }
+}
+
+async function notifyClosingChallenges(deps: SweepDeps, now: string): Promise<number> {
+  if (deps.proposals === undefined) return 0;
+  const closing = findClosingChallenges(await deps.proposals.listOpen(), now);
+  for (const proposal of closing) {
+    const engagement = await deps.engagements.findById(proposal.engagement_id);
+    if (engagement === null) continue;
+    const milestone = await deps.milestones.findByIndex(
+      proposal.engagement_id,
+      proposal.milestone_index,
+    );
+    await notifyAll(
+      deps.notify,
+      await recipientEmails(deps.businesses, engagement),
+      challengeClosingEmail(
+        engagement.ens_subname,
+        milestone?.name ?? null,
+        proposal.milestone_index,
+        proposal.challenge_deadline,
+      ),
+    );
+  }
+  return closing.length;
 }

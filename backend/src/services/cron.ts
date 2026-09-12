@@ -32,7 +32,12 @@ export const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PROPOSAL_EXPIRY_NOTICE_MS = 24 * 60 * 60 * 1000;
 
 async function sweepTick(deps: CronDeps): Promise<void> {
-  await runSweep(deps);
+  await runSweep({
+    milestones: deps.milestones,
+    engagements: deps.engagements,
+    businesses: deps.businesses,
+    notify: deps.notify,
+  });
 }
 
 async function proposalExpiryTick(deps: CronDeps): Promise<void> {

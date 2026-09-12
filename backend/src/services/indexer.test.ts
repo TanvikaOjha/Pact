@@ -1,8 +1,14 @@
 import { describe, expect, test } from "vitest";
 
 import type { BusinessStore } from "../repos/businesses.js";
+import type { BondRow, BondStore, NewBond } from "../repos/engagements.js";
 import type { NewReputationEvent, ReputationEventRow, ReputationStore } from "../repos/reputation.js";
-import { recordPactCompleted, createIndexerArchive, startPactCompletedWatcher } from "./indexer.js";
+import {
+  createIndexerArchive,
+  recordBondEvent,
+  recordPactCompleted,
+  startPactCompletedWatcher,
+} from "./indexer.js";
 
 function createMemoryStores() {
   const events: ReputationEventRow[] = [];
@@ -58,6 +64,40 @@ function createMemoryStores() {
   return { businesses, reputation, events };
 }
 
+function createMemoryBondStore() {
+  const rows: BondRow[] = [];
+  const store: BondStore = {
+    findByEngagement: async (engagementId: string) =>
+      rows.find((row) => row.engagement_id === engagementId) ?? null,
+    recordPosted: async (row: NewBond) => {
+      const created: BondRow = {
+        engagement_id: row.engagementId,
+        amount: row.amount,
+        bonder_wallet: row.bonderWallet,
+        posted_at: new Date().toISOString(),
+        frozen: false,
+        settled_at: null,
+        slashed_amount: 0,
+      };
+      rows.push(created);
+      return created;
+    },
+    setFrozen: async (engagementId: string, frozen: boolean) => {
+      const row = rows.find((candidate) => candidate.engagement_id === engagementId);
+      if (row !== undefined) row.frozen = frozen;
+    },
+    recordReturned: async (engagementId: string, settledAt: string) => {
+      const row = rows.find((candidate) => candidate.engagement_id === engagementId);
+      if (row !== undefined) row.settled_at = settledAt;
+    },
+    recordSlashed: async (engagementId: string, slashedAmount: number) => {
+      const row = rows.find((candidate) => candidate.engagement_id === engagementId);
+      if (row !== undefined) row.slashed_amount = slashedAmount;
+    },
+  };
+  return { store, rows };
+}
+
 describe("indexer", () => {
   test("returns null when unconfigured", () => {
     const stores = createMemoryStores();
@@ -67,6 +107,7 @@ describe("indexer", () => {
         escrowAddress: "",
         businesses: stores.businesses,
         reputation: stores.reputation,
+        bonds: createMemoryBondStore().store,
       }),
     ).toBeNull();
   });
@@ -116,6 +157,67 @@ describe("indexer", () => {
     );
     expect(recorded).toBe(false);
     expect(stores.events).toHaveLength(0);
+  });
+});
+
+describe("recordBondEvent", () => {
+  test("posted creates the bond row, frozen/returned update it", async () => {
+    const bonds = createMemoryBondStore();
+    await recordBondEvent(
+      { bonds: bonds.store },
+      "posted",
+      { engagementId: "eng-1", bonder: "0xBonder", provider: "", amount: 750 },
+      "2026-09-12T12:00:00.000Z",
+    );
+    expect(bonds.rows).toHaveLength(1);
+    expect(bonds.rows[0]).toMatchObject({
+      engagement_id: "eng-1",
+      amount: 750,
+      bonder_wallet: "0xBonder",
+      frozen: false,
+      settled_at: null,
+      slashed_amount: 0,
+    });
+
+    await recordBondEvent(
+      { bonds: bonds.store },
+      "frozen",
+      { engagementId: "eng-1", bonder: "", provider: "", amount: 0 },
+      "2026-09-12T12:01:00.000Z",
+    );
+    expect(bonds.rows[0]?.frozen).toBe(true);
+
+    await recordBondEvent(
+      { bonds: bonds.store },
+      "returned",
+      { engagementId: "eng-1", bonder: "", provider: "0xProvider", amount: 750 },
+      "2026-09-12T12:02:00.000Z",
+    );
+    expect(bonds.rows[0]?.settled_at).toBe("2026-09-12T12:02:00.000Z");
+  });
+
+  test("slashed accumulates onto the existing row", async () => {
+    const bonds = createMemoryBondStore();
+    await recordBondEvent(
+      { bonds: bonds.store },
+      "posted",
+      { engagementId: "eng-1", bonder: "0xBonder", provider: "", amount: 750 },
+      "2026-09-12T12:00:00.000Z",
+    );
+    await recordBondEvent(
+      { bonds: bonds.store },
+      "slashed",
+      { engagementId: "eng-1", bonder: "", provider: "", amount: 100 },
+      "2026-09-12T12:01:00.000Z",
+    );
+    expect(bonds.rows[0]?.slashed_amount).toBe(100);
+    await recordBondEvent(
+      { bonds: bonds.store },
+      "slashed",
+      { engagementId: "eng-1", bonder: "", provider: "", amount: 50 },
+      "2026-09-12T12:02:00.000Z",
+    );
+    expect(bonds.rows[0]?.slashed_amount).toBe(150);
   });
 });
 

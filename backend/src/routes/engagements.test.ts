@@ -432,6 +432,33 @@ describe("engagements", () => {
     expect(released.body.engagementCompleted).toBe(true);
   });
 
+  test("viaExecute skips only the world gate for M3-executed releases", async () => {
+    const created = await api(
+      port,
+      "POST",
+      "/api/engagements",
+      WALLET_A,
+      draft({ onChainId: "0xeng-execute", totalAmount: 6000, milestones: WHALE_MILESTONES }),
+    );
+    expect(created.status).toBe(201);
+    const id = created.body.id ?? "";
+    await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+
+    const blocked = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_A);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe("world_attestation_required");
+
+    const executed = await api(
+      port,
+      "POST",
+      `/api/engagements/${id}/milestones/0/release`,
+      WALLET_A,
+      JSON.stringify({ viaExecute: true }),
+    );
+    expect(executed.status).toBe(200);
+    expect(executed.body.engagementCompleted).toBe(true);
+  });
+
   test("submit stores evidence hash and echoes it with the late flag", async () => {
     const created = await api(port, "POST", "/api/engagements", WALLET_A, draft({ onChainId: "0xeng-ev" }));
     const id = created.body.id ?? "";

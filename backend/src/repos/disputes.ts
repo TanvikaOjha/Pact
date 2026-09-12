@@ -38,6 +38,13 @@ function firstRow(rows: DisputeVoteRow[] | null): DisputeVoteRow | null {
   return row;
 }
 
+function firstProposalRow(rows: DisputeProposalRow[] | null): DisputeProposalRow | null {
+  if (rows === null || rows.length === 0) return null;
+  const row = rows[0];
+  if (row === undefined) return null;
+  return row;
+}
+
 /** Mirror of the on-chain vote quorum (see PactEscrow.resolveDispute). */
 export function createSupabaseDisputeVoteStore(client: SupabaseClient): DisputeVoteStore {
   return {
@@ -90,6 +97,97 @@ export function createSupabaseDisputeVoteStore(client: SupabaseClient): DisputeV
         .returns<Array<{ id: string }>>();
       if (result.error) throw new Error(`dispute vote lookup failed: ${result.error.message}`);
       return result.data !== null && result.data.length > 0;
+    },
+  };
+}
+
+export interface DisputeProposalRow {
+  engagement_id: string;
+  milestone_index: number;
+  provider_amount: number;
+  client_refund: number;
+  proposer_wallet: string;
+  challenge_deadline: string;
+  challenged: boolean;
+  executed_at: string | null;
+}
+
+export interface NewDisputeProposal {
+  engagementId: string;
+  milestoneIndex: number;
+  providerAmount: number;
+  clientRefund: number;
+  proposerWallet: string;
+  challengeDeadline: string;
+}
+
+export interface DisputeProposalStore {
+  findProposal(engagementId: string, index: number): Promise<DisputeProposalRow | null>;
+  upsertProposal(row: NewDisputeProposal): Promise<DisputeProposalRow>;
+  markChallenged(engagementId: string, index: number): Promise<void>;
+  markExecuted(engagementId: string, index: number, executedAt: string): Promise<void>;
+  listOpen(): Promise<DisputeProposalRow[]>;
+}
+
+/** Mirror of on-chain optimistic-dispute state (propose/challenge/execute). */
+export function createSupabaseDisputeProposalStore(client: SupabaseClient): DisputeProposalStore {
+  return {
+    async findProposal(engagementId: string, index: number): Promise<DisputeProposalRow | null> {
+      const result = await client
+        .from("dispute_proposals")
+        .select("*")
+        .eq("engagement_id", engagementId)
+        .eq("milestone_index", index)
+        .limit(1)
+        .returns<DisputeProposalRow[]>();
+      if (result.error) throw new Error(`dispute proposal lookup failed: ${result.error.message}`);
+      return firstProposalRow(result.data);
+    },
+    async upsertProposal(row: NewDisputeProposal): Promise<DisputeProposalRow> {
+      const result = await client
+        .from("dispute_proposals")
+        .upsert(
+          {
+            engagement_id: row.engagementId,
+            milestone_index: row.milestoneIndex,
+            provider_amount: row.providerAmount,
+            client_refund: row.clientRefund,
+            proposer_wallet: row.proposerWallet,
+            challenge_deadline: row.challengeDeadline,
+          },
+          { onConflict: "engagement_id,milestone_index" },
+        )
+        .select()
+        .returns<DisputeProposalRow[]>();
+      if (result.error) throw new Error(`dispute proposal upsert failed: ${result.error.message}`);
+      const created = firstProposalRow(result.data);
+      if (created === null) throw new Error("dispute proposal upsert returned no row");
+      return created;
+    },
+    async markChallenged(engagementId: string, index: number): Promise<void> {
+      const result = await client
+        .from("dispute_proposals")
+        .update({ challenged: true })
+        .eq("engagement_id", engagementId)
+        .eq("milestone_index", index);
+      if (result.error) throw new Error(`dispute proposal update failed: ${result.error.message}`);
+    },
+    async markExecuted(engagementId: string, index: number, executedAt: string): Promise<void> {
+      const result = await client
+        .from("dispute_proposals")
+        .update({ executed_at: executedAt })
+        .eq("engagement_id", engagementId)
+        .eq("milestone_index", index);
+      if (result.error) throw new Error(`dispute proposal update failed: ${result.error.message}`);
+    },
+    async listOpen(): Promise<DisputeProposalRow[]> {
+      const result = await client
+        .from("dispute_proposals")
+        .select("*")
+        .is("executed_at", null)
+        .returns<DisputeProposalRow[]>();
+      if (result.error) throw new Error(`dispute proposal lookup failed: ${result.error.message}`);
+      return result.data ?? [];
     },
   };
 }

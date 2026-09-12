@@ -50,6 +50,11 @@ const submitBodySchema = z.object({
   evidenceHash: z.string().regex(EVIDENCE_HASH_PATTERN).nullish(),
 });
 
+/** M3-executed releases mirror via this flag; only the selfie gate is skipped. */
+const releaseBodySchema = z.object({
+  viaExecute: z.boolean().optional(),
+});
+
 /** Mirror-only lateness for display; the chain flag is authoritative. */
 function isLateMirror(dueDate: string | null, submittedAt: string): boolean {
   if (dueDate === null) return false;
@@ -279,6 +284,8 @@ export async function loadMilestoneContext(
  * Record an on-chain milestone release in the mirror. When escrow reads are
  * available the chain must confirm `released`, otherwise nothing is recorded.
  * Completes the engagement once every milestone is released.
+ * `viaExecute` mirrors an M3 executeResolution release: it skips only the
+ * high-value World session gate; the chain isReleased check still applies.
  */
 async function handleRelease(
   req: Request,
@@ -300,7 +307,13 @@ async function handleRelease(
     res.status(409).json({ error: "not_submitted" });
     return;
   }
-  if (milestone.amount >= options.highValueThreshold && milestone.world_session_id === null) {
+  const body = releaseBodySchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ error: "invalid_request" });
+    return;
+  }
+  const viaExecute = body.data.viaExecute ?? false;
+  if (!viaExecute && milestone.amount >= options.highValueThreshold && milestone.world_session_id === null) {
     res.status(409).json({
       error: "world_attestation_required",
       threshold: options.highValueThreshold,
