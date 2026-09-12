@@ -8,6 +8,8 @@ import Marquee from "@/components/Marquee";
 import RevealOnScroll from "@/components/RevealOnScroll";
 import StatCounter from "@/components/StatCounter";
 import TemplateIcon from "@/components/TemplateIcon";
+import { DecryptReveal } from "@/components/canvas/DecryptReveal";
+import { GlyphRain } from "@/components/canvas/GlyphRain";
 
 const failures = [
   {
@@ -51,8 +53,26 @@ export default function Landing() {
   return (
     <div>
       {/* HERO */}
-      <section className="py-24">
-        <div className="grid lg:grid-cols-2 gap-10 items-center">
+      <section className="relative py-24 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+          <GlyphRain
+            className="h-full w-full"
+            color={[0.18, 0.83, 0.75]}
+            headColor={[0.37, 0.92, 0.83]}
+            density={0.06}
+            speed={0.12}
+            trail={0.8}
+            glow={1}
+            dim={0}
+            light={0.6}
+            lightRadius={200}
+            stir={0}
+            layers={1}
+          >
+            <div className="h-full w-full" />
+          </GlyphRain>
+        </div>
+        <div className="relative grid lg:grid-cols-2 gap-10 items-center">
           <div>
             <motion.div
               className="flex items-center gap-2 mb-6"
@@ -124,6 +144,16 @@ export default function Landing() {
 
           {/* Terminal mockup split — the brand's one decorative system */}
           <div className="grid gap-4">
+            <DecryptReveal
+              color="#2DD4BF"
+              background="#2b2622"
+              colored={0}
+              radius={280}
+              aberration={0}
+              edgeTint={0.6}
+              scramble={0.06}
+              scrambleSpeed={4}
+            >
             <motion.div
               className="terminal"
               initial={{ opacity: 0, y: 24 }}
@@ -140,6 +170,7 @@ export default function Landing() {
                 <p><span className="text-ink-mute">pact:status&nbsp;&nbsp;&nbsp;</span><span className="text-ink">active</span></p>
               </div>
             </motion.div>
+            </DecryptReveal>
             <motion.div
               className="terminal"
               initial={{ opacity: 0, y: 24 }}

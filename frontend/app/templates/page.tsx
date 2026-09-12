@@ -9,6 +9,7 @@ import { loadEngagements } from "@/lib/utils";
 import { TEMPLATES, CUSTOM_TEMPLATE } from "@/lib/templates";
 import TemplateIcon from "@/components/TemplateIcon";
 import RevealOnScroll from "@/components/RevealOnScroll";
+import { ParticleReveal } from "@/components/canvas/ParticleReveal";
 
 export default function TemplatePicker() {
   const { walletAddress, ready } = useAuth();
@@ -33,8 +34,17 @@ export default function TemplatePicker() {
 
       <div className="grid sm:grid-cols-3 gap-4 mb-4">
         {TEMPLATES.map((t, i) => (
-          <RevealOnScroll key={t.id} delay={i * 0.06}>
+          <RevealOnScroll key={t.id} delay={i * 0.06} className="h-full">
             <Link href={`/templates/${t.id}`} className="block h-full">
+              <ParticleReveal
+                className="h-full rounded"
+                background="#383330"
+                radius={320}
+                aberration={0}
+                bend={20}
+                drift={0.4}
+                scatter={12}
+              >
               <motion.div
                 whileHover={{ y: -4 }}
                 transition={{ duration: 0.15 }}
@@ -51,6 +61,7 @@ export default function TemplatePicker() {
                   ))}
                 </ul>
               </motion.div>
+              </ParticleReveal>
             </Link>
           </RevealOnScroll>
         ))}
