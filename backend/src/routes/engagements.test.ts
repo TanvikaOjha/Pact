@@ -205,8 +205,16 @@ describe("engagements", () => {
         engagements: createMemoryEngagementStore(),
         milestones: createMemoryMilestoneStore(),
         businesses: createMemoryBusinessStore(),
-        // Null chain readers: dev paths record without on-chain proof.
+        // Null chain readers + recording sinks: dev paths record without on-chain proof.
         checkReleased: null,
+        votes: {
+          hasVotesForEngagement: async () => false,
+          findMatchingCounterVote: async () => null,
+          recordVote: async () => {
+            throw new Error("not implemented in engagement tests");
+          },
+        },
+        reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
       }),
     );
     await new Promise<void>((resolve) => {

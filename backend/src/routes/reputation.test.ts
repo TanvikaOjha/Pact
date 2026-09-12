@@ -14,19 +14,24 @@ import type {
   NewEngagement,
   NewMilestone,
 } from "../repos/engagements.js";
+import type {
+  NewReputationEvent,
+  ReputationEventRow,
+  ReputationStore,
+} from "../repos/reputation.js";
 import { createDisputesRouter } from "./disputes.js";
 import { createEngagementsRouter } from "./engagements.js";
+import { createReputationRouter } from "./reputation.js";
 
 const WALLET_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WALLET_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const OUTSIDER = "0xffffffffffffffffffffffffffffffffffffffff";
 
-function businessRow(id: string, wallet: string): BusinessRow {
+function businessRow(id: string, wallet: string, subname: string): BusinessRow {
   return {
     id,
     wallet_address: wallet,
     privy_wallet_id: "dev",
-    ens_subname: `${id}.pact-hack.eth`,
+    ens_subname: subname,
     world_session_id: `session_dev_${id}`,
     world_verified_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
@@ -34,10 +39,14 @@ function businessRow(id: string, wallet: string): BusinessRow {
 }
 
 function createStores() {
-  const businesses: BusinessRow[] = [businessRow("biz-a", WALLET_A), businessRow("biz-b", WALLET_B)];
+  const businesses: BusinessRow[] = [
+    businessRow("biz-a", WALLET_A, "studio.pact-hack.eth"),
+    businessRow("biz-b", WALLET_B, "agency.pact-hack.eth"),
+  ];
   const engagements: EngagementRow[] = [];
   const milestones: MilestoneRow[] = [];
   const votes: DisputeVoteRow[] = [];
+  const events: ReputationEventRow[] = [];
 
   const businessStore: BusinessStore = {
     findById: async (id: string) => businesses.find((row) => row.id === id) ?? null,
@@ -48,7 +57,7 @@ function createStores() {
     findByWorldSession: async (worldSessionId: string) =>
       businesses.find((row) => row.world_session_id === worldSessionId) ?? null,
     insert: async () => {
-      throw new Error("not implemented in dispute tests");
+      throw new Error("not implemented in reputation tests");
     },
   };
   const engagementStore: EngagementStore = {
@@ -142,17 +151,6 @@ function createStores() {
           vote.wallet_address !== excludeWallet,
       ) ?? null,
     recordVote: async (vote: NewDisputeVote) => {
-      const existing = votes.find(
-        (candidate) =>
-          candidate.engagement_id === vote.engagementId &&
-          candidate.milestone_index === vote.milestoneIndex &&
-          candidate.wallet_address === vote.walletAddress,
-      );
-      if (existing !== undefined) {
-        existing.provider_amount = vote.providerAmount;
-        existing.client_refund = vote.clientRefund;
-        return existing;
-      }
       const row: DisputeVoteRow = {
         id: `vote-${votes.length + 1}`,
         engagement_id: vote.engagementId,
@@ -168,47 +166,76 @@ function createStores() {
     hasVotesForEngagement: async (engagementId: string) =>
       votes.some((vote) => vote.engagement_id === engagementId),
   };
-  return { businessStore, engagementStore, milestoneStore, voteStore };
+  const reputationStore: ReputationStore = {
+    recordCompletion: async (entries: NewReputationEvent[]) => {
+      for (const entry of entries) {
+        events.push({
+          id: `rep-${events.length + 1}`,
+          engagement_id: entry.engagementId,
+          business_id: entry.businessId,
+          counterparty_id: entry.counterpartyId,
+          template_type: entry.templateType,
+          total_value: entry.totalValue,
+          on_time: entry.onTime,
+          disputed: entry.disputed,
+          tx_hash: entry.txHash,
+          emitted_at: entry.emittedAt,
+        });
+      }
+    },
+    eventsForBusiness: async (businessId: string) =>
+      events.filter((event) => event.business_id === businessId),
+  };
+  return { businessStore, engagementStore, milestoneStore, voteStore, reputationStore };
 }
 
-interface DisputeEnvelope {
+interface ReputationEnvelope {
   error?: string;
-  disputed?: boolean;
-  resolved?: boolean;
-  releasedAt?: string;
-  engagementCompleted?: boolean;
+  ensSubname?: string;
+  completedCount?: number;
+  totalValue?: number;
+  onTimeRate?: number | null;
+  disputeCount?: number;
+  recent?: Array<{
+    templateType?: number;
+    totalValue?: number;
+    onTime?: boolean;
+    disputed?: boolean;
+    counterpartySubname?: string | null;
+  }>;
+  engagementId?: string;
   id?: string;
+  engagementCompleted?: boolean;
 }
 
 async function api(
   port: number,
+  method: string,
   path: string,
   wallet: string | null,
   payload?: string,
-): Promise<{ status: number; body: DisputeEnvelope }> {
+): Promise<{ status: number; body: ReputationEnvelope }> {
   const headers = new Headers({ "content-type": "application/json" });
   if (wallet !== null) headers.set("x-wallet-address", wallet);
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-    method: "POST",
-    headers,
-    body: payload,
-  });
-  // SAFETY: test-only decode of the dispute envelopes produced by this router.
-  const body = (await res.json()) as DisputeEnvelope;
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers, body: payload });
+  // SAFETY: test-only decode of the envelopes produced by these routers.
+  const body = (await res.json()) as ReputationEnvelope;
   return { status: res.status, body };
 }
 
-const MILESTONE = {
-  counterpartyWallet: WALLET_B,
-  templateType: 1,
-  termsHash: "0xabc123",
-  totalAmount: 2000,
-  onChainId: "offchain-dispute",
-  ensSubname: "eng-dispute.pact-hack.eth",
-  milestones: [{ index: 0, name: "Work", description: "Done", amount: 2000, dueDate: "2026-10-15" }],
-};
+function engagementDraft(onChainId: string): string {
+  return JSON.stringify({
+    counterpartyWallet: WALLET_B,
+    templateType: 1,
+    termsHash: "0xabc123",
+    totalAmount: 2000,
+    onChainId,
+    ensSubname: `eng-${onChainId}.pact-hack.eth`,
+    milestones: [{ index: 0, name: "Work", description: "Done", amount: 2000, dueDate: "2026-10-15" }],
+  });
+}
 
-describe("disputes", () => {
+describe("reputation", () => {
   let server: Server | null = null;
   let port = 0;
 
@@ -229,9 +256,9 @@ describe("disputes", () => {
         engagements: stores.engagementStore,
         milestones: stores.milestoneStore,
         businesses: stores.businessStore,
-        checkReleased: null,
         votes: stores.voteStore,
-        reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
+        reputation: stores.reputationStore,
+        checkReleased: null,
       }),
     );
     app.use(
@@ -241,8 +268,15 @@ describe("disputes", () => {
         milestones: stores.milestoneStore,
         businesses: stores.businessStore,
         votes: stores.voteStore,
-        reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
+        reputation: stores.reputationStore,
         checkDisputed: null,
+      }),
+    );
+    app.use(
+      "/api",
+      createReputationRouter({
+        businesses: stores.businessStore,
+        reputation: stores.reputationStore,
       }),
     );
     await new Promise<void>((resolve) => {
@@ -268,114 +302,51 @@ describe("disputes", () => {
     });
   });
 
-  test("raise freezes the milestone; double raise and outsiders fail", async () => {
-    const created = await api(
-      port,
-      "/api/engagements",
-      WALLET_A,
-      JSON.stringify({ ...MILESTONE, onChainId: "offchain-dispute-1" }),
-    );
-    expect(created.status).toBe(201);
+  test("clean completion records on-time reputation for both parties", async () => {
+    const created = await api(port, "POST", "/api/engagements", WALLET_A, engagementDraft("offchain-rep-1"));
     const id = created.body.id ?? "";
+    await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+    const released = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_B);
+    expect(released.body.engagementCompleted).toBe(true);
 
-    const submit = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/submit`,
-      WALLET_A,
-    );
-    expect(submit.status).toBe(200);
+    const profile = await api(port, "GET", "/api/businesses/studio.pact-hack.eth/reputation", null);
+    expect(profile.status).toBe(200);
+    expect(profile.body.completedCount).toBe(1);
+    expect(profile.body.totalValue).toBe(2000);
+    expect(profile.body.onTimeRate).toBe(1);
+    expect(profile.body.disputeCount).toBe(0);
+    expect(profile.body.recent?.length).toBe(1);
+    expect(profile.body.recent?.[0]).toMatchObject({
+      templateType: 1,
+      totalValue: 2000,
+      onTime: true,
+      disputed: false,
+      counterpartySubname: "agency.pact-hack.eth",
+    });
 
-    const outsider = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/dispute`,
-      OUTSIDER,
-    );
-    expect(outsider.status).toBe(403);
-
-    const raised = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/dispute`,
-      WALLET_B,
-    );
-    expect(raised.status).toBe(200);
-    expect(raised.body.disputed).toBe(true);
-
-    const repeat = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/dispute`,
-      WALLET_A,
-    );
-    expect(repeat.status).toBe(409);
-    expect(repeat.body.error).toBe("already_disputed");
-
-    const releaseBlocked = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/release`,
-      WALLET_A,
-    );
-    expect(releaseBlocked.status).toBe(409);
-    expect(releaseBlocked.body.error).toBe("milestone_disputed");
+    const counterparty = await api(port, "GET", "/api/businesses/agency.pact-hack.eth/reputation", null);
+    expect(counterparty.body.completedCount).toBe(1);
+    expect(counterparty.body.recent?.[0]?.counterpartySubname).toBe("studio.pact-hack.eth");
   });
 
-  test("matching co-signed votes resolve; mismatches stay pending", async () => {
-    const created = await api(
-      port,
-      "/api/engagements",
-      WALLET_A,
-      JSON.stringify({ ...MILESTONE, onChainId: "offchain-dispute-2" }),
-    );
-    expect(created.status).toBe(201);
+  test("disputed completion taints reputation permanently", async () => {
+    const created = await api(port, "POST", "/api/engagements", WALLET_A, engagementDraft("offchain-rep-2"));
     const id = created.body.id ?? "";
-    await api(port, `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
-    await api(port, `/api/engagements/${id}/milestones/0/dispute`, WALLET_A);
+    await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+    await api(port, "POST", `/api/engagements/${id}/milestones/0/dispute`, WALLET_B);
+    const split = JSON.stringify({ providerAmount: 1500, clientRefund: 500 });
+    await api(port, "POST", `/api/engagements/${id}/milestones/0/resolve`, WALLET_A, split);
+    const resolved = await api(port, "POST", `/api/engagements/${id}/milestones/0/resolve`, WALLET_B, split);
+    expect(resolved.body.engagementCompleted).toBe(true);
 
-    const split = (providerAmount: number, clientRefund: number): string =>
-      JSON.stringify({ providerAmount, clientRefund });
+    const profile = await api(port, "GET", "/api/businesses/studio.pact-hack.eth/reputation", null);
+    expect(profile.body.completedCount).toBe(2);
+    expect(profile.body.disputeCount).toBe(1);
+    expect(profile.body.onTimeRate).toBe(0.5);
+  });
 
-    const mismatch = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/resolve`,
-      WALLET_A,
-      split(1000, 0),
-    );
-    expect(mismatch.status).toBe(400);
-    expect(mismatch.body.error).toBe("amounts_mismatch");
-
-    const firstVote = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/resolve`,
-      WALLET_A,
-      split(1200, 800),
-    );
-    expect(firstVote.status).toBe(200);
-    expect(firstVote.body.resolved).toBe(false);
-
-    const otherSplit = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/resolve`,
-      WALLET_B,
-      split(2000, 0),
-    );
-    expect(otherSplit.status).toBe(200);
-    expect(otherSplit.body.resolved).toBe(false);
-
-    const match = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/resolve`,
-      WALLET_B,
-      split(1200, 800),
-    );
-    expect(match.status).toBe(200);
-    expect(match.body.resolved).toBe(true);
-    expect(match.body.engagementCompleted).toBe(true);
-
-    const settled = await api(
-      port,
-      `/api/engagements/${id}/milestones/0/resolve`,
-      WALLET_A,
-      split(1200, 800),
-    );
-    expect(settled.status).toBe(409);
-    expect(settled.body.error).toBe("not_disputed");
+  test("unknown subnames 404", async () => {
+    const missing = await api(port, "GET", "/api/businesses/ghost.pact-hack.eth/reputation", null);
+    expect(missing.status).toBe(404);
   });
 });

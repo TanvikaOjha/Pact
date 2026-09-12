@@ -120,12 +120,17 @@ backend/
     chain-verified when configured; completes engagement on last release)
     routes/disputes.ts   POST .../dispute (freeze + DISPUTED) + .../resolve
     (co-signed split record; mutual match releases + reopens ACTIVE)
+    routes/reputation.ts GET /businesses/:subname/reputation (public track
+    record from mirror; reproducible from PactCompleted events)
     routes/scheduler.ts  POST /api/scheduler/sweep (due-release detection;
     execution via session signer follows)
     repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
     repos/proposals.ts   ProposalStore (ephemeral drafts, 14d TTL)
     repos/engagements.ts EngagementStore + MilestoneStore (chain is authoritative)
     repos/disputes.ts    DisputeVoteStore (co-sign quorum mirror)
+    repos/reputation.ts  ReputationStore (append-only PactCompleted mirror)
+    services/reputation.ts recordCompletionIfNeeded (guarded finalization mirror)
+    services/indexer.ts  PactCompleted watcher (disabled without escrow config)
     ens/pact-terms.ts    Terms-V1 canonicalizer — MUST stay byte-identical to
                          root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)

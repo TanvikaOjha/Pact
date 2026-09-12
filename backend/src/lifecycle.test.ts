@@ -231,6 +231,14 @@ describe("lifecycle: register, propose, accept, submit, release", () => {
         milestones: stores.milestoneStore,
         businesses: stores.businessStore,
         checkReleased: null,
+        votes: {
+          hasVotesForEngagement: async () => false,
+          findMatchingCounterVote: async () => null,
+          recordVote: async () => {
+            throw new Error("not implemented in lifecycle tests");
+          },
+        },
+        reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
       }),
     );
     await new Promise<void>((resolve) => {

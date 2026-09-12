@@ -8,6 +8,8 @@ export interface BusinessRow {
   world_session_id: string | null;
   world_verified_at: string | null;
   created_at: string;
+  /** Optional: absent on rows written before migration 0005. */
+  email?: string | null;
 }
 
 export interface NewBusiness {
@@ -15,6 +17,7 @@ export interface NewBusiness {
   privyWalletId: string;
   ensSubname: string;
   worldSessionId: string;
+  email: string | null;
 }
 
 export interface BusinessStore {
@@ -58,6 +61,7 @@ export function createSupabaseBusinessStore(client: SupabaseClient): BusinessSto
           ens_subname: business.ensSubname,
           world_session_id: business.worldSessionId,
           world_verified_at: new Date().toISOString(),
+          email: business.email,
         })
         .select()
         .returns<BusinessRow[]>();

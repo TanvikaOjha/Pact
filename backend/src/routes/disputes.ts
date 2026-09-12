@@ -4,9 +4,10 @@ import { z } from "zod";
 import type { BusinessStore } from "../repos/businesses.js";
 import type { DisputeVoteStore } from "../repos/disputes.js";
 import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
+import type { ReputationStore } from "../repos/reputation.js";
 import { log } from "../services/log.js";
+import { recordCompletionIfNeeded } from "../services/reputation.js";
 import {
-  completeEngagementIfReleased,
   isParty,
   loadMilestoneContext,
 } from "./engagements.js";
@@ -21,6 +22,7 @@ export interface DisputesRouteOptions {
   milestones: MilestoneStore;
   businesses: BusinessStore;
   votes: DisputeVoteStore;
+  reputation: ReputationStore;
   /** Null when escrow reads are unavailable; raise recording proceeds (dev/offchain path). */
   checkDisputed: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
@@ -137,9 +139,13 @@ async function handleResolve(
   const releasedAt = new Date().toISOString();
   await options.milestones.markResolved(milestone.id, releasedAt);
   await options.engagements.updateStatus(engagement.id, "ACTIVE");
-  const engagementCompleted = await completeEngagementIfReleased(
-    options.engagements,
-    options.milestones,
+  const engagementCompleted = await recordCompletionIfNeeded(
+    {
+      engagements: options.engagements,
+      milestones: options.milestones,
+      votes: options.votes,
+      reputation: options.reputation,
+    },
     engagement.id,
   );
   log.info(`dispute resolved: engagement ${engagement.id} milestone ${index}`);

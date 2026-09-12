@@ -28,6 +28,7 @@ export interface DisputeVoteStore {
     excludeWallet: string,
   ): Promise<DisputeVoteRow | null>;
   recordVote(vote: NewDisputeVote): Promise<DisputeVoteRow>;
+  hasVotesForEngagement(engagementId: string): Promise<boolean>;
 }
 
 function firstRow(rows: DisputeVoteRow[] | null): DisputeVoteRow | null {
@@ -79,6 +80,16 @@ export function createSupabaseDisputeVoteStore(client: SupabaseClient): DisputeV
       const row = firstRow(result.data);
       if (row === null) throw new Error("dispute vote insert returned no row");
       return row;
+    },
+    async hasVotesForEngagement(engagementId: string): Promise<boolean> {
+      const result = await client
+        .from("dispute_votes")
+        .select("id")
+        .eq("engagement_id", engagementId)
+        .limit(1)
+        .returns<Array<{ id: string }>>();
+      if (result.error) throw new Error(`dispute vote lookup failed: ${result.error.message}`);
+      return result.data !== null && result.data.length > 0;
     },
   };
 }

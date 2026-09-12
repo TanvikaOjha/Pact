@@ -2,13 +2,16 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { z } from "zod";
 
 import type { BusinessStore } from "../repos/businesses.js";
+import type { DisputeVoteStore } from "../repos/disputes.js";
 import type {
   EngagementRow,
   EngagementStore,
   MilestoneRow,
   MilestoneStore,
 } from "../repos/engagements.js";
+import type { ReputationStore } from "../repos/reputation.js";
 import { log } from "../services/log.js";
+import { recordCompletionIfNeeded } from "../services/reputation.js";
 import { releaseAfter } from "../services/scheduler.js";
 
 const milestoneInputSchema = z.object({
@@ -33,6 +36,8 @@ export interface EngagementsRouteOptions {
   engagements: EngagementStore;
   milestones: MilestoneStore;
   businesses: BusinessStore;
+  votes: DisputeVoteStore;
+  reputation: ReputationStore;
   /** Null when escrow reads are unavailable; recording proceeds (dev/offchain path). */
   checkReleased: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
@@ -221,24 +226,6 @@ export async function loadMilestoneContext(
 }
 
 /**
- * Shared mirror logic: flip the engagement to COMPLETED once every milestone
- * carries a release timestamp. Used by both release recording and dispute
- * resolution (both end with funds moved).
- */
-export async function completeEngagementIfReleased(
-  engagements: EngagementStore,
-  milestones: MilestoneStore,
-  engagementId: string,
-): Promise<boolean> {
-  const remaining = await milestones.listByEngagement(engagementId);
-  const completed = remaining.length > 0 && remaining.every((candidate) => candidate.released_at !== null);
-  if (completed) {
-    await engagements.updateStatus(engagementId, "COMPLETED");
-  }
-  return completed;
-}
-
-/**
  * Record an on-chain milestone release in the mirror. When escrow reads are
  * available the chain must confirm `released`, otherwise nothing is recorded.
  * Completes the engagement once every milestone is released.
@@ -272,9 +259,13 @@ async function handleRelease(
   }
   const releasedAt = new Date().toISOString();
   await options.milestones.markReleased(milestone.id, releasedAt);
-  const engagementCompleted = await completeEngagementIfReleased(
-    options.engagements,
-    options.milestones,
+  const engagementCompleted = await recordCompletionIfNeeded(
+    {
+      engagements: options.engagements,
+      milestones: options.milestones,
+      votes: options.votes,
+      reputation: options.reputation,
+    },
     engagement.id,
   );
   log.info(`milestone released: engagement ${engagement.id} milestone ${index}`);

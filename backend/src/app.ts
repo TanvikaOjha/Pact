@@ -7,6 +7,7 @@ import { errorHandler, requestId } from "./middleware/http.js";
 import { createRequireAuth, createPrivyVerifier, getPrivyClient } from "./middleware/privyAuth.js";
 import { createSupabaseBusinessStore } from "./repos/businesses.js";
 import { createSupabaseDisputeVoteStore } from "./repos/disputes.js";
+import { createSupabaseReputationStore } from "./repos/reputation.js";
 import { createSupabaseEngagementStore, createSupabaseMilestoneStore } from "./repos/engagements.js";
 import { createSupabaseProposalStore } from "./repos/proposals.js";
 import { healthRouter } from "./routes/health.js";
@@ -14,9 +15,12 @@ import { meRouter } from "./routes/me.js";
 import { createBusinessesRouter } from "./routes/businesses.js";
 import { createDisputesRouter } from "./routes/disputes.js";
 import { createEngagementsRouter } from "./routes/engagements.js";
+import { createReputationRouter } from "./routes/reputation.js";
 import { createProposalsRouter } from "./routes/proposals.js";
 import { createSchedulerRouter } from "./routes/scheduler.js";
 import { createWorldRouter } from "./routes/world.js";
+import { startPactCompletedWatcher } from "./services/indexer.js";
+import { log } from "./services/log.js";
 
 export function createApp() {
   const env = loadEnv();
@@ -67,6 +71,12 @@ export function createApp() {
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
       businesses: businessStore,
+      votes: createSupabaseDisputeVoteStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      reputation: createSupabaseReputationStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
       checkReleased:
         escrowReader === null
           ? null
@@ -92,10 +102,22 @@ export function createApp() {
       votes: createSupabaseDisputeVoteStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+      reputation: createSupabaseReputationStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
       checkDisputed:
         escrowReader === null
           ? null
           : (onChainId: string, index: number) => escrowReader.isDisputed(onChainId, index),
+    }),
+  );
+  app.use(
+    "/api",
+    createReputationRouter({
+      businesses: businessStore,
+      reputation: createSupabaseReputationStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
     }),
   );
   apiRouter.use(
@@ -119,6 +141,17 @@ export function createApp() {
     }),
   );
   app.use("/api", apiRouter);
+  const watcher = startPactCompletedWatcher({
+    rpcUrl: env.SEPOLIA_RPC_URL,
+    escrowAddress: env.PACT_ESCROW_ADDRESS ?? "",
+    businesses: businessStore,
+    reputation: createSupabaseReputationStore(
+      getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+    ),
+  });
+  if (watcher !== null) {
+    log.info("pact completed indexer watching");
+  }
   app.use(errorHandler);
   return app;
 }
