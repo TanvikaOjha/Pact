@@ -5,7 +5,7 @@ interface Props {
 }
 
 export default function Seal({ size = 40, className = "", tone = "ink" }: Props) {
-  const color = tone === "stamp" ? "#1F5C46" : "#161A1E";
+  const color = tone === "stamp" ? "#1F5C46" : "#1B1F24";
   return (
     <svg
       width={size}

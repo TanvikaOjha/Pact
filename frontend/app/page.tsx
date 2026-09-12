@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { useStore } from "@/lib/store";
-import Seal from "../components/Seal";
-import Marquee from "../components/Marquee";
-import RevealOnScroll from "../components/RevealOnScroll";
-import StatCounter from "../components/StatCounter";
-import TemplateIcon from "../components/TemplateIcon";
+import Seal from "@/components/Seal";
+import Marquee from "@/components/Marquee";
+import RevealOnScroll from "@/components/RevealOnScroll";
+import StatCounter from "@/components/StatCounter";
+import TemplateIcon from "@/components/TemplateIcon";
 
 const failures = [
   {
@@ -74,7 +74,7 @@ export default function Landing() {
 
             <h1 className="font-serif text-[2.5rem] sm:text-[3.3rem] leading-[1.08] max-w-xl">
               {headline.map((line, i) => (
-                <span key={line} className="block overflow-hidden">
+                <span key={line} className="block ">
                   <motion.span
                     className="block"
                     initial={{ y: "110%" }}
@@ -185,7 +185,7 @@ export default function Landing() {
             <RevealOnScroll key={f.title} delay={i * 0.08}>
               <motion.div
                 className="border border-rule p-5 bg-paper-bright h-full"
-                whileHover={{ y: -3, borderColor: "#161A1E" }}
+                whileHover={{ y: -3, borderColor: "#1B1F24" }}
                 transition={{ duration: 0.15 }}
               >
                 <div className="w-9 h-9 flex items-center justify-center border border-rule mb-3 text-stamp">
