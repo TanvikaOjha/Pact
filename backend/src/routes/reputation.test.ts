@@ -91,6 +91,7 @@ function createStores() {
     listByEngagement: async (engagementId: string) =>
       milestones.filter((row) => row.engagement_id === engagementId),
     listSubmittedUnreleased: async () => [],
+    listDisputed: async () => [],
     findByIndex: async (engagementId: string, index: number) =>
       milestones.find((row) => row.engagement_id === engagementId && row.index === index) ?? null,
     insertMany: async (entries: NewMilestone[]) => {
@@ -122,7 +123,10 @@ function createStores() {
     },
     setDisputed: async (id: string, disputed: boolean) => {
       const row = milestones.find((candidate) => candidate.id === id) ?? null;
-      if (row !== null) row.disputed = disputed;
+      if (row !== null) {
+        row.disputed = disputed;
+        row.disputed_at = disputed ? new Date().toISOString() : null;
+      }
       return row;
     },
     markResolved: async (id: string, releasedAt: string) => {

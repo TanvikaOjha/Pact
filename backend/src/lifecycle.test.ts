@@ -70,6 +70,10 @@ function createStores() {
       if (row !== null) row.accepted_engagement_id = engagementId;
       return row;
     },
+    listExpiringUnaccepted: async (beforeIso: string) =>
+      [...proposals.values()].filter(
+        (row) => row.accepted_engagement_id === null && row.expires_at <= beforeIso,
+      ),
   };
   const engagementStore: EngagementStore = {
     findById: async (id: string) => engagements.find((row) => row.id === id) ?? null,
@@ -108,6 +112,8 @@ function createStores() {
       milestones.filter(
         (row) => row.submitted_at !== null && row.released_at === null && !row.disputed,
       ),
+    listDisputed: async () =>
+      milestones.filter((row) => row.disputed && row.released_at === null),
     findByIndex: async (engagementId: string, index: number) =>
       milestones.find((row) => row.engagement_id === engagementId && row.index === index) ?? null,
     insertMany: async (entries: NewMilestone[]) => {
@@ -139,7 +145,10 @@ function createStores() {
     },
     setDisputed: async (id: string, disputed: boolean) => {
       const row = milestones.find((candidate) => candidate.id === id) ?? null;
-      if (row !== null) row.disputed = disputed;
+      if (row !== null) {
+        row.disputed = disputed;
+        row.disputed_at = disputed ? new Date().toISOString() : null;
+      }
       return row;
     },
     markResolved: async (id: string, releasedAt: string) => {

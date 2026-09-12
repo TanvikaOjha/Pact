@@ -86,6 +86,8 @@ describe("POST /api/scheduler/sweep", () => {
       listByEngagement: async () => [],
       listSubmittedUnreleased: async () =>
         rows.filter((row) => row.submitted_at !== null && row.released_at === null && !row.disputed),
+      listDisputed: async () =>
+        rows.filter((row) => row.disputed && row.released_at === null),
       findByIndex: async () => null,
       insertMany: async () => [],
       markSubmitted: async () => null,

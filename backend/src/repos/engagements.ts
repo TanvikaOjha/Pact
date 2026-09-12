@@ -50,6 +50,8 @@ export interface MilestoneRow {
   released_at: string | null;
   disputed: boolean;
   world_session_id: string | null;
+  /** Optional: absent on rows written before migration 0006. */
+  disputed_at?: string | null;
 }
 
 export interface NewMilestone {
@@ -64,6 +66,7 @@ export interface NewMilestone {
 export interface MilestoneStore {
   listByEngagement(engagementId: string): Promise<MilestoneRow[]>;
   listSubmittedUnreleased(): Promise<MilestoneRow[]>;
+  listDisputed(): Promise<MilestoneRow[]>;
   findByIndex(engagementId: string, index: number): Promise<MilestoneRow | null>;
   insertMany(milestones: NewMilestone[]): Promise<MilestoneRow[]>;
   markSubmitted(id: string, submittedAt: string): Promise<MilestoneRow | null>;
@@ -158,6 +161,16 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
       if (result.error) throw new Error(`milestone lookup failed: ${result.error.message}`);
       return result.data ?? [];
     },
+    async listDisputed(): Promise<MilestoneRow[]> {
+      const result = await client
+        .from("milestones")
+        .select("*")
+        .eq("disputed", true)
+        .is("released_at", null)
+        .returns<MilestoneRow[]>();
+      if (result.error) throw new Error(`milestone lookup failed: ${result.error.message}`);
+      return result.data ?? [];
+    },
     async findByIndex(engagementId: string, index: number): Promise<MilestoneRow | null> {
       const result = await client
         .from("milestones")
@@ -211,7 +224,7 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
     async setDisputed(id: string, disputed: boolean): Promise<MilestoneRow | null> {
       const result = await client
         .from("milestones")
-        .update({ disputed })
+        .update({ disputed, disputed_at: disputed ? new Date().toISOString() : null })
         .eq("id", id)
         .select()
         .returns<MilestoneRow[]>();

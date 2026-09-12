@@ -46,6 +46,7 @@ export interface ProposalStore {
   findByToken(token: string): Promise<ProposalRow | null>;
   insert(proposal: NewProposal): Promise<ProposalRow>;
   markAccepted(token: string, engagementId: string): Promise<ProposalRow | null>;
+  listExpiringUnaccepted(beforeIso: string): Promise<ProposalRow[]>;
 }
 
 function firstRow(rows: ProposalRow[] | null): ProposalRow | null {
@@ -94,6 +95,16 @@ export function createSupabaseProposalStore(client: SupabaseClient): ProposalSto
         .returns<ProposalRow[]>();
       if (result.error) throw new Error(`proposal update failed: ${result.error.message}`);
       return firstRow(result.data);
+    },
+    async listExpiringUnaccepted(beforeIso: string): Promise<ProposalRow[]> {
+      const result = await client
+        .from("proposals")
+        .select("*")
+        .is("accepted_engagement_id", null)
+        .lte("expires_at", beforeIso)
+        .returns<ProposalRow[]>();
+      if (result.error) throw new Error(`proposal lookup failed: ${result.error.message}`);
+      return result.data ?? [];
     },
   };
 }

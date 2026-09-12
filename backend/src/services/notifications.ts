@@ -172,3 +172,39 @@ export function releaseDueEmail(
     ].join("\n"),
   };
 }
+
+export function windowClosingEmail(
+  ensSubname: string,
+  name: string | null,
+  index: number,
+  releaseAfter: string,
+): EmailContent {
+  return {
+    subject: `Acceptance window closing: ${ensSubname}`,
+    text: [
+      `${milestoneLabel(name, index)} on engagement ${ensSubname} auto-releases`,
+      `at ${releaseAfter}. Accept or dispute before then.`,
+    ].join("\n"),
+  };
+}
+
+export function proposalExpiringEmail(token: string, expiresAt: string): EmailContent {
+  return {
+    subject: `Proposal expiring soon: ${token}`,
+    text: [
+      `Your proposal ${token} expires at ${expiresAt} without a counter-signature.`,
+      `No funds move unless the counterparty accepts in time.`,
+    ].join("\n"),
+  };
+}
+
+export function disputeStaleEmail(ensSubname: string, name: string | null, index: number): EmailContent {
+  return {
+    subject: `Stale dispute needs co-signature: ${ensSubname}`,
+    text: [
+      `${milestoneLabel(name, index)} on engagement ${ensSubname} has been`,
+      `disputed for 30 days with no resolution. Pact cannot force one:`,
+      `co-sign a split or seek external arbitration. USDC stays in escrow.`,
+    ].join("\n"),
+  };
+}

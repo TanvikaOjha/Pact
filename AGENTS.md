@@ -137,6 +137,8 @@ backend/
                          root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)
     services/notifications.ts Resend notifier (log-only without key) + templates
+    services/cron.ts     in-process loop (sweep/15m, proposals/1h, disputes/24h);
+    external cron can hit the HTTP endpoints instead
     services/world.ts    portal verify via fetch to v4/verify/{rp_id} + zod parsing
     services/scheduler.ts ACCEPTANCE_WINDOW_HOURS + releaseAfter + findDueReleases (pure)
     types/express.d.ts   Request augmentation
@@ -144,7 +146,7 @@ backend/
                          only after root scripts stabilize — never fork them)
   supabase/migrations/0001_pact_core.sql + 0002_business_session_unique.sql
   + 0003_dispute_votes.sql + 0004_proposal_accepted.sql
-  + 0005_business_email.sql
+  + 0005_business_email.sql + 0006_milestone_disputed_at.sql
   src/lifecycle.test.ts  cross-router composition proof (register→propose→
   accept→submit→release); update it when handoffs change
   oxlint.config.ts
@@ -186,7 +188,7 @@ Contracts (run in `contracts/`): `forge build` · `forge test`
   `WORLD_APP_ID` / `WORLD_ACTION_ID`, `RESEND_API_KEY`,
   `USDC_SEPOLIA_ADDRESS`, `PACT_REGISTRY_ADDRESS`, `PACT_ESCROW_ADDRESS`
 - **Defaults:** `PORT=4000`, `DEV_WORLD_STUB=true`, `ALLOW_DEV_AUTH=false` (dev-header
-  auth is opt-in; never enable in prod), `ENS_ROOT_NAME=pact-hack.eth` (the root actually
+  auth is opt-in; never enable in prod), `CRON_ENABLED=true`, `ENS_ROOT_NAME=pact-hack.eth` (the root actually
   registered on Sepolia — do NOT change to `pact.eth` until it exists on-chain),
   `WORLD_HIGH_VALUE_THRESHOLD=5000` (whole-USDC milestone amounts at/above this need a
   bound World session before release recording). Flags parse strict `"true"`/`"false"` via

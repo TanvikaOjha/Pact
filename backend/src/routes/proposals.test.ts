@@ -73,6 +73,10 @@ function createMemoryProposalStore(): ProposalStore {
       if (row !== null) row.accepted_engagement_id = engagementId;
       return row;
     },
+    listExpiringUnaccepted: async (beforeIso: string) =>
+      [...rows.values()].filter(
+        (row) => row.accepted_engagement_id === null && row.expires_at <= beforeIso,
+      ),
   };
 }
 
@@ -113,6 +117,7 @@ function createMemoryMilestoneStore(): MilestoneStore {
     listByEngagement: async (engagementId: string) =>
       rows.filter((row) => row.engagement_id === engagementId),
     listSubmittedUnreleased: async () => [],
+    listDisputed: async () => [],
     findByIndex: async (engagementId: string, index: number) =>
       rows.find((row) => row.engagement_id === engagementId && row.index === index) ?? null,
     insertMany: async (entries: NewMilestone[]) => {

@@ -126,7 +126,10 @@ function createMemoryMilestoneStore(): MilestoneStore {
     },
     setDisputed: async (id: string, disputed: boolean) => {
       const row = rows.find((candidate) => candidate.id === id) ?? null;
-      if (row !== null) row.disputed = disputed;
+      if (row !== null) {
+        row.disputed = disputed;
+        row.disputed_at = disputed ? new Date().toISOString() : null;
+      }
       return row;
     },
     markResolved: async (id: string, releasedAt: string) => {
@@ -148,6 +151,8 @@ function createMemoryMilestoneStore(): MilestoneStore {
       rows.filter(
         (row) => row.submitted_at !== null && row.released_at === null && !row.disputed,
       ),
+    listDisputed: async () =>
+      rows.filter((row) => row.disputed && row.released_at === null),
     markReleased: async (id: string, releasedAt: string) => {
       const row = rows.find((candidate) => candidate.id === id) ?? null;
       if (row !== null) row.released_at = releasedAt;
