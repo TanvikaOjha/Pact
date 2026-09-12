@@ -59,7 +59,7 @@ export default function ProposalPage() {
       <p className="text-ink-soft mb-8">
         {formatUSDC(engagement.totalAmount)} USDC ·{" "}
         {isProposer ? (
-          <>proposed to {engagement.partyBSlug}.pact.eth</>
+          <>proposed to {engagement.partyBSlug}.pact-hack.eth</>
         ) : (
           <>proposed by a counterparty</>
         )}
@@ -76,11 +76,11 @@ export default function ProposalPage() {
       {isProposer ? (
         <div className="border border-rule bg-paper-bright p-5">
           <p className="text-sm mb-3">
-            Waiting on <span className="font-mono">{engagement.partyBSlug}.pact.eth</span> to
+            Waiting on <span className="font-mono">{engagement.partyBSlug}.pact-hack.eth</span> to
             open this link and sign. Nothing is escrowed until they do.
           </p>
           <button onClick={handleSign} disabled={!!signing} className="btn-ghost text-sm">
-            {signing ?? `Simulate ${engagement.partyBSlug}.pact.eth opening this link →`}
+            {signing ?? `Simulate ${engagement.partyBSlug}.pact-hack.eth opening this link →`}
           </button>
           {signing && <p className="text-xs text-ink-faint mt-2 cursor-blink">{signing}</p>}
         </div>

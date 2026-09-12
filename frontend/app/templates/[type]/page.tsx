@@ -237,7 +237,7 @@ export default function TemplateFormPage() {
         "pact:type": "split",
         "pact:joint-scope": spScope,
         "pact:party-a": `${currentBusiness?.ensSubname} / ${spShareA}%`,
-        "pact:party-b": `${slugify(counterpartySlug)}.pact.eth / ${100 - spShareA}%`,
+        "pact:party-b": `${slugify(counterpartySlug)}.pact-hack.eth / ${100 - spShareA}%`,
         "pact:total": String(total),
         "pact:client": spClientEns,
       };
@@ -415,7 +415,7 @@ export default function TemplateFormPage() {
               onChange={(e) => setCounterpartySlug(e.target.value)}
             />
             <p className="mono-tag text-ink-faint mt-1">
-              {slugify(counterpartySlug || "counterparty")}.pact.eth
+              {slugify(counterpartySlug || "counterparty")}.pact-hack.eth
             </p>
           </div>
 
@@ -459,7 +459,7 @@ export default function TemplateFormPage() {
             records={Object.entries({
               ...draft.fields,
               "pact:party-a": currentBusiness.ensSubname,
-              "pact:party-b": `${slugify(counterpartySlug)}.pact.eth (set when they sign)`,
+              "pact:party-b": `${slugify(counterpartySlug)}.pact-hack.eth (set when they sign)`,
               "pact:status": "proposed",
             })}
           />
@@ -766,7 +766,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             className="field-input"
             value={state.spClientEns}
             onChange={(e: any) => state.setSpClientEns(e.target.value)}
-            placeholder="reef-client.pact.eth"
+            placeholder="reef-client.pact-hack.eth"
           />
         </Field>
         <Field label={`Your share: ${state.spShareA}% · Co-provider: ${100 - state.spShareA}%`}>

@@ -10,7 +10,7 @@ export type TemplateType =
 export interface Business {
   id: string;
   slug: string;
-  ensSubname: string; // "<slug>.pact.eth"
+  ensSubname: string; // "<slug>.pact-hack.eth"
   walletAddress: string;
   worldVerified: boolean;
   worldSessionId: string;
@@ -48,7 +48,7 @@ export type EngagementStatus =
 
 export interface Engagement {
   id: string;
-  ensSubname: string; // "eng-xxxxx.pact.eth"
+  ensSubname: string; // "eng-xxxxx.pact-hack.eth"
   templateType: TemplateType;
   title: string;
   scope: string;

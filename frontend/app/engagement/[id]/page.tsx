@@ -111,7 +111,7 @@ export default function EngagementPage() {
       </div>
 
       <p className="font-mono text-sm text-ink-faint mb-1">
-        {partyA?.ensSubname ?? "…"} ↔ {partyB?.ensSubname ?? `${engagement.partyBSlug}.pact.eth`}
+        {partyA?.ensSubname ?? "…"} ↔ {partyB?.ensSubname ?? `${engagement.partyBSlug}.pact-hack.eth`}
       </p>
       <p className="font-mono text-sm text-slate mb-3">
         {engagement.ensSubname} ↗ &nbsp;·&nbsp; {formatUSDC(escrowRemaining)} USDC in escrow
@@ -205,7 +205,7 @@ export default function EngagementPage() {
           title="Atomic split, one transaction"
           records={[
             [partyA?.ensSubname ?? "party-a", formatUSDC(((engagement.splitShareA ?? 5000) / 10000) * engagement.totalAmount)],
-            [partyB?.ensSubname ?? `${engagement.partyBSlug}.pact.eth`, formatUSDC(((engagement.splitShareB ?? 5000) / 10000) * engagement.totalAmount)],
+            [partyB?.ensSubname ?? `${engagement.partyBSlug}.pact-hack.eth`, formatUSDC(((engagement.splitShareB ?? 5000) / 10000) * engagement.totalAmount)],
           ]}
         />
       )}
