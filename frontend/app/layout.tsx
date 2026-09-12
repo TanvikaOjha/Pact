@@ -1,26 +1,26 @@
 import type { Metadata } from "next";
-import { Fraunces, Inter, IBM_Plex_Mono } from "next/font/google";
+import { DM_Mono, Instrument_Serif, Inter } from "next/font/google";
 import "./globals.css";
-import { StoreProvider } from "@/lib/store";
+import { AuthProvider } from "@/lib/auth";
 import Nav from "@/components/Nav";
-import Toasts from "@/components/Toasts";
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-fraunces",
-  weight: ["400", "500", "600"],
-  style: ["normal", "italic"],
-});
+import Toaster, { ToastProvider } from "@/components/Toaster";
 
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
 });
 
-const plexMono = IBM_Plex_Mono({
+const dmMono = DM_Mono({
   subsets: ["latin"],
-  variable: "--font-plex-mono",
-  weight: ["400", "500"],
+  variable: "--font-dm-mono",
+  weight: ["400"],
+});
+
+const instrument = Instrument_Serif({
+  subsets: ["latin"],
+  variable: "--font-instrument",
+  weight: ["400"],
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -37,13 +37,22 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${fraunces.variable} ${inter.variable} ${plexMono.variable} font-sans text-ink grain`}
+        className={`${inter.variable} ${dmMono.variable} ${instrument.variable} font-sans text-ink bg-canvas`}
       >
-        <StoreProvider>
-          <Nav />
-          <main className="max-w-5xl mx-auto px-6 pb-24">{children}</main>
-          <Toasts />
-        </StoreProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <Nav />
+            <main className="max-w-5xl mx-auto px-6 pb-24">{children}</main>
+            <footer className="border-t border-line">
+              <div className="max-w-5xl mx-auto px-6 py-10 flex flex-wrap gap-x-8 gap-y-2 text-sm text-ink-mute">
+                <span className="font-mono text-xs uppercase tracking-wider">Pact</span>
+                <span>Your contract is an ENS name. Your reputation is an event log.</span>
+                <span className="ml-auto font-mono text-xs">sepolia · usdc · ensv2</span>
+              </div>
+            </footer>
+            <Toaster />
+          </ToastProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -28,11 +28,7 @@ export default function VerifyStamp({ ensSubname, records: localRecords, termsHa
       const expectedHash = termsHash.toLowerCase();
 
       setChainRecords(result.records);
-      if (actualHash !== expectedHash) {
-        setPhase("mismatch");
-      } else {
-        setPhase("verified");
-      }
+      setPhase(actualHash !== expectedHash ? "mismatch" : "verified");
     } catch (err) {
       setError(err instanceof Error ? err.message : "ENS resolution failed");
       setPhase("error");
@@ -45,25 +41,25 @@ export default function VerifyStamp({ ensSubname, records: localRecords, termsHa
       : localRecords;
 
   return (
-    <div className="border border-rule bg-paper-bright">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-rule gap-4">
+    <div className="plate rounded overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-line gap-4">
         <div>
-          <p className="mono-tag text-ink-faint">Live ENS resolution — no backend call</p>
-          <p className="mono-tag">{ensSubname}</p>
+          <p className="mono-tag text-ink-mute">Live ENS resolution — no backend call</p>
+          <p className="mono-tag text-accent mt-1">{ensSubname}</p>
         </div>
         {phase === "idle" && (
-          <button onClick={() => void run()} className="btn-ghost text-sm">
+          <button onClick={() => void run()} className="btn-ghost text-sm shrink-0">
             Verify on ENS
           </button>
         )}
         {phase === "resolving" && (
-          <span className="mono-tag text-ink-faint cursor-blink">resolving</span>
+          <span className="mono-tag text-ink-mute cursor-blink">resolving</span>
         )}
         {phase === "mismatch" && (
           <span className="mono-tag text-danger">mismatch</span>
         )}
         {phase === "error" && (
-          <button onClick={() => void run()} className="btn-ghost text-sm">
+          <button onClick={() => void run()} className="btn-ghost text-sm shrink-0">
             Retry
           </button>
         )}
@@ -74,17 +70,17 @@ export default function VerifyStamp({ ensSubname, records: localRecords, termsHa
           <div className="space-y-1.5">
             {displayedRecords.map(([k, v]) => (
               <div key={k} className="flex gap-3 text-sm font-mono">
-                <span className="text-ink-faint shrink-0 w-40">{k}</span>
-                <span className="break-all">{v}</span>
+                <span className="text-ink-mute shrink-0 w-40 truncate">{k}</span>
+                <span className="break-all text-ink-body">{v}</span>
               </div>
             ))}
-            <div className="flex gap-3 text-sm font-mono pt-1 border-t border-rule mt-2">
-              <span className="text-ink-faint shrink-0 w-40">pact:terms-hash</span>
-              <span className="break-all">{chainRecords["pact:terms-hash"] ?? "(unset)"}</span>
+            <div className="flex gap-3 text-sm font-mono pt-2 border-t border-line mt-2">
+              <span className="text-ink-mute shrink-0 w-40">pact:terms-hash</span>
+              <span className="break-all text-ink-body">{chainRecords["pact:terms-hash"] ?? "(unset)"}</span>
             </div>
             <div className="flex gap-3 text-sm font-mono">
-              <span className="text-ink-faint shrink-0 w-40">pact:status</span>
-              <span className="break-all">{chainRecords["pact:status"] ?? "(unset)"}</span>
+              <span className="text-ink-mute shrink-0 w-40">pact:status</span>
+              <span className="break-all text-ink-body">{chainRecords["pact:status"] ?? "(unset)"}</span>
             </div>
           </div>
 
@@ -94,11 +90,11 @@ export default function VerifyStamp({ ensSubname, records: localRecords, termsHa
                 className="pointer-events-none absolute -top-3 right-4 select-none animate-stampIn"
                 aria-hidden="true"
               >
-                <div className="border-[3px] border-stamp text-stamp px-3 py-1 -rotate-6 font-mono text-sm tracking-widest opacity-90">
+                <div className="border-[3px] border-accent text-accent px-3 py-1 -rotate-6 font-mono text-sm tracking-widest opacity-90">
                   VERIFIED
                 </div>
               </div>
-              <p className="text-sm text-stamp mt-3">
+              <p className="text-sm text-accent mt-3">
                 ENS terms hash matches the terms shown before signing.
               </p>
             </>
@@ -117,7 +113,6 @@ export default function VerifyStamp({ ensSubname, records: localRecords, termsHa
           {error ?? "Unable to resolve ENS records."}
         </p>
       )}
-
     </div>
   );
 }

@@ -1,69 +1,80 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Milestone } from "@/lib/types";
+import type { LocalMilestone } from "@/lib/utils";
 import { formatDate, formatUSDC } from "@/lib/utils";
 
 interface Props {
-  milestone: Milestone;
+  milestone: LocalMilestone;
   isProvider: boolean;
-  worldRequired: boolean;
+  busy: boolean;
+  autoReleaseTemplate: boolean;
+  isLast: boolean;
   onSubmit: () => void;
   onAccept: () => void;
   onDispute: () => void;
-  onAutoRelease: () => void;
-  autoReleaseTemplate: boolean;
-  isLast: boolean;
+  onResolve: () => void;
 }
 
-const statusLabel: Record<Milestone["status"], string> = {
+type VisualStatus = "pending" | "submitted" | "released" | "disputed";
+
+function visualStatus(m: LocalMilestone): VisualStatus {
+  if (m.releasedAt !== null) return "released";
+  if (m.disputed) return "disputed";
+  if (m.submittedAt !== null) return "submitted";
+  return "pending";
+}
+
+const statusLabel: Record<VisualStatus, string> = {
   pending: "Pending",
   submitted: "Awaiting acceptance",
   released: "Released",
   disputed: "Disputed",
 };
 
-const statusPill: Record<Milestone["status"], string> = {
-  pending: "text-ink-faint border-rule",
-  submitted: "text-ember border-ember/50 bg-ember-soft",
-  released: "text-stamp border-stamp/50 bg-stamp-soft",
-  disputed: "text-danger border-danger/50 bg-danger-soft",
+const statusPill: Record<VisualStatus, string> = {
+  pending: "text-ink-mute border-line",
+  submitted: "text-warn border-warn/50 bg-warn-dim",
+  released: "text-accent border-accent/50 bg-accent/10",
+  disputed: "text-danger border-danger/50 bg-danger-dim",
 };
 
 export default function MilestoneRow({
   milestone: m,
   isProvider,
+  busy,
+  autoReleaseTemplate,
+  isLast,
   onSubmit,
   onAccept,
   onDispute,
-  onAutoRelease,
-  autoReleaseTemplate,
-  isLast,
+  onResolve,
 }: Props) {
+  const status = visualStatus(m);
   return (
     <div className="relative flex gap-4 pb-7">
       {!isLast && (
-        <span className="absolute left-[13px] top-7 bottom-0 w-px bg-rule" />
+        <span className="absolute left-[13px] top-7 bottom-0 w-px bg-line" />
       )}
 
       <div className="relative z-10 shrink-0 pt-0.5">
         <div
-          className={`w-7 h-7 rounded-full border flex items-center justify-center bg-paper-bright ${
-            m.status === "released"
-              ? "border-stamp"
-              : m.status === "disputed"
+          className={`w-7 h-7 rounded-full border flex items-center justify-center bg-canvas ${
+            status === "released"
+              ? "border-accent"
+              : status === "disputed"
               ? "border-danger"
-              : m.status === "submitted"
-              ? "border-ember"
-              : "border-rule"
+              : status === "submitted"
+              ? "border-warn"
+              : "border-line"
           }`}
         >
-          {m.status === "released" ? (
+          {status === "released" ? (
             <motion.svg width="14" height="14" viewBox="0 0 14 14">
               <motion.path
                 d="M2.5 7.2L5.5 10.5L11.5 3.5"
                 fill="none"
-                stroke="#1F5C46"
+                stroke="#2DD4BF"
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -72,51 +83,57 @@ export default function MilestoneRow({
                 transition={{ duration: 0.4, ease: "easeOut" }}
               />
             </motion.svg>
-          ) : m.status === "disputed" ? (
+          ) : status === "disputed" ? (
             <span className="text-danger text-sm leading-none">!</span>
-          ) : m.status === "submitted" ? (
-            <span className="w-2 h-2 rounded-full bg-ember" />
+          ) : status === "submitted" ? (
+            <span className="w-2 h-2 rounded-full bg-warn" />
           ) : (
-            <span className="w-1.5 h-1.5 rounded-full bg-rule-dark" />
+            <span className="w-1.5 h-1.5 rounded-full bg-line" />
           )}
         </div>
       </div>
 
       <div className="flex-1 min-w-0 flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0 max-w-sm">
-          <p className="text-sm">{m.name}</p>
-          <p className="text-xs text-ink-faint truncate">{m.deliverable}</p>
-          <p className="text-xs text-ink-faint mt-1">Due {formatDate(m.due)}</p>
+          <p className="text-sm text-ink">{m.name}</p>
+          <p className="text-xs text-ink-mute truncate">{m.deliverable}</p>
+          <p className="text-xs text-ink-mute mt-1">
+            Due {formatDate(m.due)}
+            {m.late && <span className="text-danger"> · late</span>}
+            {m.evidenceHash && (
+              <span className="text-accent"> · evidence ✓</span>
+            )}
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
           <span className="font-mono text-sm">{formatUSDC(m.amount)}</span>
-          <span className={`text-xs px-2 py-1 border ${statusPill[m.status]}`}>
-            {statusLabel[m.status]}
-            {m.worldVerifiedAt && <span className="opacity-70"> · selfie ✓</span>}
+          <span className={`pill ${statusPill[status]}`}>
+            {statusLabel[status]}
+            {m.worldRequired && <span className="opacity-70"> · selfie</span>}
           </span>
         </div>
 
         <div className="flex gap-2 w-full sm:w-auto justify-end">
-          {m.status === "pending" && isProvider && (
-            <button onClick={onSubmit} className="btn-ghost text-xs px-3 py-1.5">
+          {status === "pending" && isProvider && (
+            <button onClick={onSubmit} disabled={busy} className="btn-ghost text-xs px-3 py-1.5">
               Submit completion
             </button>
           )}
-          {m.status === "pending" && !isProvider && autoReleaseTemplate && (
-            <button onClick={onAutoRelease} className="btn-ghost text-xs px-3 py-1.5">
-              Simulate auto-release
-            </button>
-          )}
-          {m.status === "submitted" && !isProvider && (
+          {status === "submitted" && !isProvider && (
             <>
-              <button onClick={onDispute} className="btn-ghost text-xs px-3 py-1.5">
+              <button onClick={onDispute} disabled={busy} className="btn-ghost text-xs px-3 py-1.5">
                 Dispute
               </button>
-              <button onClick={onAccept} className="btn-primary text-xs px-3 py-1.5">
+              <button onClick={onAccept} disabled={busy} className="btn-primary text-xs px-3 py-1.5">
                 Accept
               </button>
             </>
+          )}
+          {status === "disputed" && (
+            <button onClick={onResolve} disabled={busy} className="btn-ghost text-xs px-3 py-1.5">
+              {autoReleaseTemplate ? "Propose resolution" : "Co-sign resolution"}
+            </button>
           )}
         </div>
       </div>

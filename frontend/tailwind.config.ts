@@ -5,44 +5,37 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        canvas: {
+          DEFAULT: "#2B2622",
+          soft: "#383330",
+        },
+        line: {
+          DEFAULT: "#3F3A36",
+        },
         ink: {
-          DEFAULT: "#1B1F24",
-          soft: "#333A42",
-          faint: "#6B7280",
+          DEFAULT: "#F7F5F0",
+          strong: "#DAD2C1",
+          body: "#C9C0AD",
+          mute: "#AEA69C",
         },
-        paper: {
-          DEFAULT: "#EFEAE0",
-          dim: "#E4DECD",
-          bright: "#FBF9F3",
-        },
-        rule: {
-          DEFAULT: "#D9D2BF",
-          dark: "#A9A08A",
-        },
-        stamp: {
-          DEFAULT: "#1F5C46",
-          soft: "#E3EEE7",
-        },
-        ember: {
-          DEFAULT: "#A15A22",
-          soft: "#F1E4D3",
-        },
-        slate: {
-          DEFAULT: "#3E5468",
-          soft: "#E4E9EE",
+        accent: {
+          DEFAULT: "#2DD4BF",
+          bright: "#5EEAD4",
+          dim: "#134E4A",
         },
         danger: {
-          DEFAULT: "#8C2F2F",
-          soft: "#F1E0DE",
+          DEFAULT: "#E0654F",
+          dim: "#4A2320",
+        },
+        warn: {
+          DEFAULT: "#D9A441",
+          dim: "#4A3A1C",
         },
       },
       fontFamily: {
-        serif: ["var(--font-fraunces)", "Georgia", "serif"],
+        serif: ["var(--font-instrument)", "Georgia", "serif"],
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
-        mono: ["var(--font-plex-mono)", "monospace"],
-      },
-      boxShadow: {
-        none: "none",
+        mono: ["var(--font-dm-mono)", "ui-monospace", "monospace"],
       },
       keyframes: {
         stampIn: {

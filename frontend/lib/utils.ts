@@ -1,38 +1,7 @@
-export function shortId(len = 6): string {
-  const chars = "abcdef0123456789";
-  let out = "";
-  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-export function mockAddress(): string {
-  const chars = "abcdef0123456789";
-  let out = "0x";
-  for (let i = 0; i < 40; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-export function mockTxHash(): string {
-  const chars = "abcdef0123456789";
-  let out = "0x";
-  for (let i = 0; i < 64; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-// Deterministic-looking pseudo keccak256 for display purposes only.
-export function mockTermsHash(payload: string): string {
-  let h1 = 0xdeadbeef ^ payload.length;
-  let h2 = 0x41c6ce57 ^ payload.length;
-  for (let i = 0; i < payload.length; i++) {
-    const ch = payload.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = (h1 ^ (h1 >>> 16)) >>> 0;
-  h2 = (h2 ^ (h2 >>> 16)) >>> 0;
-  const hex = (h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0")).repeat(4);
-  return "0x" + hex.slice(0, 64);
-}
+// Pure client-side helpers: formatting plus localStorage persistence for
+// engagement records mirrored from real API responses. The backend has no
+// GET-engagement endpoint, so snapshots returned by propose/accept/submit
+// calls are the record — chain state stays authoritative.
 
 export function truncateMid(value: string, head = 6, tail = 4): string {
   if (value.length <= head + tail + 3) return value;
@@ -63,6 +32,136 @@ export function slugify(input: string): string {
     .slice(0, 24);
 }
 
-export function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export interface LocalMilestone {
+  index: number;
+  name: string;
+  deliverable: string;
+  due: string;
+  amount: number;
+  worldRequired: boolean;
+  submittedAt: string | null;
+  releasedAt: string | null;
+  disputed: boolean;
+  late: boolean;
+  evidenceHash: string | null;
+}
+
+export type LocalEngagementStatus = "PROPOSED" | "ACTIVE" | "COMPLETED" | "DISPUTED";
+
+export interface LocalEngagement {
+  id: string;
+  onChainId: string;
+  ensSubname: string;
+  templateType: number;
+  templateName: string;
+  title: string;
+  scope: string;
+  acceptanceCriteria: string;
+  totalAmount: number;
+  termsHash: string;
+  status: LocalEngagementStatus;
+  counterparty: string;
+  proposerWallet: string;
+  milestones: LocalMilestone[];
+  proposalToken: string;
+  visibility: string;
+  updatedAt: string;
+}
+
+const ENGAGEMENTS_KEY = "pact.engagements.v1";
+const SUBNAMES_KEY = "pact.subnames.v1";
+const PROPOSALS_KEY = "pact.proposals.v1";
+
+export interface ProposalSnapshot {
+  token: string;
+  title: string;
+  scope: string;
+  acceptanceCriteria: string;
+  totalAmount: number;
+  termsHash: string;
+  templateType: number;
+  templateName: string;
+  counterparty: string;
+  proposerWallet: string;
+  visibility: string;
+  milestones: LocalMilestone[];
+}
+
+function readMap(key: string): Record<string, string> {
+  try {
+    if (typeof window === "undefined") return {};
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+export function loadEngagements(): Record<string, LocalEngagement> {
+  try {
+    if (typeof window === "undefined") return {};
+    const raw = window.localStorage.getItem(ENGAGEMENTS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, LocalEngagement>;
+  } catch {
+    return {};
+  }
+}
+
+export function loadEngagement(id: string): LocalEngagement | null {
+  return loadEngagements()[id] ?? null;
+}
+
+export function saveEngagement(engagement: LocalEngagement): void {
+  if (typeof window === "undefined") return;
+  const all = loadEngagements();
+  all[engagement.id] = {
+    ...engagement,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    window.localStorage.setItem(ENGAGEMENTS_KEY, JSON.stringify(all));
+  } catch {
+    // Storage full or unavailable — the record simply won't persist.
+  }
+}
+
+export function saveSubnameFor(wallet: string, subname: string): void {
+  if (typeof window === "undefined") return;
+  const map = readMap(SUBNAMES_KEY);
+  map[wallet.toLowerCase()] = subname;
+  try {
+    window.localStorage.setItem(SUBNAMES_KEY, JSON.stringify(map));
+  } catch {
+    // Storage full or unavailable — the label simply won't persist.
+  }
+}
+
+export function loadSubnameFor(wallet: string): string | null {
+  return readMap(SUBNAMES_KEY)[wallet.toLowerCase()] ?? null;
+}
+
+export function saveProposalSnapshot(snapshot: ProposalSnapshot): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(PROPOSALS_KEY);
+    const all: Record<string, ProposalSnapshot> = raw ? JSON.parse(raw) : {};
+    all[snapshot.token] = snapshot;
+    window.localStorage.setItem(PROPOSALS_KEY, JSON.stringify(all));
+  } catch {
+    // Storage full or unavailable — the snapshot simply won't persist.
+  }
+}
+
+export function loadProposalSnapshot(token: string): ProposalSnapshot | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(PROPOSALS_KEY);
+    if (!raw) return null;
+    const all = JSON.parse(raw) as Record<string, ProposalSnapshot>;
+    return all[token] ?? null;
+  } catch {
+    return null;
+  }
 }

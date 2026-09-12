@@ -1,37 +1,86 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ChangeEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
+import { useToast } from "@/components/Toaster";
 import {
   TEMPLATES,
   CUSTOM_TEMPLATE,
   WORLD_THRESHOLD,
   DEFAULT_WINDOW_HOURS,
 } from "@/lib/templates";
-import { Engagement, Milestone, TemplateType } from "@/lib/types";
-import { formatUSDC, isoDaysFromNow, slugify } from "@/lib/utils";
+import type { TemplateType } from "@/lib/types";
+import {
+  formatUSDC,
+  isoDaysFromNow,
+  slugify,
+  saveProposalSnapshot,
+  type LocalMilestone,
+} from "@/lib/utils";
+import { ApiError, type ProposalMilestoneInput } from "@/lib/api";
 import TerminalBlock from "@/components/TerminalBlock";
 
 type Stage = "form" | "preview";
 
-function emptyMilestone(index: number, name = ""): Milestone {
+interface FormMilestone {
+  index: number;
+  name: string;
+  deliverable: string;
+  due: string;
+  amount: number;
+}
+
+function emptyMilestone(index: number, name = ""): FormMilestone {
+  return { index, name, deliverable: "", due: isoDaysFromNow(21).slice(0, 10), amount: 0 };
+}
+
+function toLocalMilestone(m: FormMilestone, worldRequired: boolean): LocalMilestone {
   return {
-    index,
-    name,
-    deliverable: "",
-    due: isoDaysFromNow(21),
-    amount: 0,
-    status: "pending",
-    worldRequired: false,
+    index: m.index,
+    name: m.name,
+    deliverable: m.deliverable,
+    due: new Date(m.due).toISOString(),
+    amount: Number(m.amount) || 0,
+    worldRequired,
+    submittedAt: null,
+    releasedAt: null,
+    disputed: false,
+    late: false,
+    evidenceHash: null,
   };
 }
+
+function toApiMilestone(m: LocalMilestone): ProposalMilestoneInput {
+  return {
+    index: m.index,
+    name: m.name,
+    deliverable: m.deliverable,
+    due: m.due,
+    amount: m.amount,
+    worldRequired: m.worldRequired,
+  };
+}
+
+/** Custom builder maps to the nearest template — shipped backend behavior. */
+function customTemplateIndex(paymentStructure: string): number {
+  if (paymentStructure === "By milestone") return 2;
+  if (paymentStructure === "By time") return 4;
+  if (paymentStructure === "Recurring") return 5;
+  return 1;
+}
+
+type InputEvent =
+  | ChangeEvent<HTMLInputElement>
+  | ChangeEvent<HTMLTextAreaElement>
+  | ChangeEvent<HTMLSelectElement>;
 
 export default function TemplateFormPage() {
   const params = useParams();
   const type = params.type as TemplateType;
   const router = useRouter();
-  const { currentBusiness, createProposal, pushToast } = useStore();
+  const { api, walletAddress } = useAuth();
+  const { pushToast } = useToast();
 
   const meta =
     type === "custom" ? CUSTOM_TEMPLATE : TEMPLATES.find((t) => t.id === type);
@@ -39,48 +88,42 @@ export default function TemplateFormPage() {
   const [stage, setStage] = useState<Stage>("form");
   const [counterpartySlug, setCounterpartySlug] = useState("");
   const [windowHours, setWindowHours] = useState(DEFAULT_WINDOW_HOURS);
+  const [sending, setSending] = useState(false);
 
-  // Fixed
   const [fixedDeliverable, setFixedDeliverable] = useState("");
   const [fixedDeadline, setFixedDeadline] = useState(isoDaysFromNow(30).slice(0, 10));
   const [fixedAcceptance, setFixedAcceptance] = useState("");
   const [fixedAmount, setFixedAmount] = useState(4000);
 
-  // Milestone
   const [msProject, setMsProject] = useState("");
   const [msAcceptance, setMsAcceptance] = useState("");
-  const [msRows, setMsRows] = useState<Milestone[]>([
+  const [msRows, setMsRows] = useState<FormMilestone[]>([
     emptyMilestone(0, "Discovery"),
     emptyMilestone(1, "Delivery"),
   ]);
 
-  // Retainer
   const [retFee, setRetFee] = useState(2000);
   const [retCapacity, setRetCapacity] = useState("");
   const [retRollover, setRetRollover] = useState<"yes" | "no">("no");
   const [retDuration, setRetDuration] = useState(6);
 
-  // T&M
   const [tmRate, setTmRate] = useState(120);
   const [tmUnit, setTmUnit] = useState<"hour" | "day">("hour");
   const [tmEstHours, setTmEstHours] = useState(80);
   const [tmCeiling, setTmCeiling] = useState(9600);
   const [tmCadence, setTmCadence] = useState<"weekly" | "biweekly" | "monthly">("biweekly");
 
-  // Recurring
   const [rcDeliverable, setRcDeliverable] = useState("");
   const [rcPeriod, setRcPeriod] = useState<"weekly" | "monthly" | "quarterly">("monthly");
   const [rcPerPeriod, setRcPerPeriod] = useState(800);
   const [rcPeriods, setRcPeriods] = useState(6);
 
-  // Split
   const [spScope, setSpScope] = useState("");
   const [spClientEns, setSpClientEns] = useState("");
   const [spShareA, setSpShareA] = useState(60);
   const [spTotal, setSpTotal] = useState(10000);
   const [spDue, setSpDue] = useState(isoDaysFromNow(30).slice(0, 10));
 
-  // Custom
   const [cQ1, setCQ1] = useState("Service");
   const [cQ2, setCQ2] = useState("On completion");
   const [cQ3, setCQ3] = useState("");
@@ -89,7 +132,7 @@ export default function TemplateFormPage() {
   const [cPhases, setCPhases] = useState(3);
   const [cWorld, setCWorld] = useState<"yes" | "no">("no");
 
-  function updateRow(i: number, patch: Partial<Milestone>) {
+  function updateRow(i: number, patch: Partial<FormMilestone>) {
     setMsRows((rows) => rows.map((r) => (r.index === i ? { ...r, ...patch } : r)));
   }
   function addRow() {
@@ -103,16 +146,16 @@ export default function TemplateFormPage() {
     );
   }
 
-  // Derive the draft engagement from whichever template's fields are filled.
   const draft = useMemo(() => {
     let title = "";
     let scope = "";
     let acceptance = "";
-    let milestones: Milestone[] = [];
+    let milestones: LocalMilestone[] = [];
     let total = 0;
     let fields: Record<string, string> = {};
     let splitShareA: number | undefined;
     let splitShareB: number | undefined;
+    let templateIndex = meta?.index ?? 1;
 
     if (type === "fixed") {
       total = Number(fixedAmount) || 0;
@@ -120,19 +163,14 @@ export default function TemplateFormPage() {
       scope = fixedDeliverable;
       acceptance = fixedAcceptance;
       milestones = [
-        {
-          ...emptyMilestone(0, "Upfront (50%)"),
-          deliverable: "Released on mutual signature",
-          due: new Date().toISOString(),
-          amount: total * 0.5,
-        },
-        {
-          ...emptyMilestone(1, "Delivery (50%)"),
-          deliverable: fixedDeliverable,
-          due: new Date(fixedDeadline).toISOString(),
-          amount: total * 0.5,
-          worldRequired: total * 0.5 >= WORLD_THRESHOLD,
-        },
+        toLocalMilestone(
+          { index: 0, name: "Upfront (50%)", deliverable: "Released on mutual signature", due: new Date().toISOString(), amount: total * 0.5 },
+          false,
+        ),
+        toLocalMilestone(
+          { index: 1, name: "Delivery (50%)", deliverable: fixedDeliverable, due: fixedDeadline, amount: total * 0.5 },
+          total * 0.5 >= WORLD_THRESHOLD,
+        ),
       ];
       fields = {
         "pact:type": "fixed",
@@ -145,19 +183,17 @@ export default function TemplateFormPage() {
       title = msProject || "Milestone engagement";
       scope = msProject;
       acceptance = msAcceptance;
-      milestones = msRows.map((r) => ({
-        ...r,
-        worldRequired: r.amount >= WORLD_THRESHOLD,
-        due: new Date(r.due).toISOString(),
-      }));
-      total = milestones.reduce((s, m) => s + Number(m.amount || 0), 0);
+      milestones = msRows.map((r) =>
+        toLocalMilestone(r, (Number(r.amount) || 0) >= WORLD_THRESHOLD)
+      );
+      total = milestones.reduce((s, m) => s + m.amount, 0);
       fields = {
         "pact:type": "milestone",
         "pact:milestone-count": String(msRows.length),
         ...Object.fromEntries(
           milestones.map((m, i) => [
             `pact:milestone-${i + 1}`,
-            `${m.name} / ${new Date(m.due).toISOString().slice(0, 10)} / ${formatUSDC(m.amount)}`,
+            `${m.name} / ${m.due.slice(0, 10)} / ${formatUSDC(m.amount)}`,
           ])
         ),
         "pact:acceptance": msAcceptance,
@@ -166,13 +202,13 @@ export default function TemplateFormPage() {
       title = "Retainer — " + (retCapacity || "reserved capacity");
       scope = retCapacity;
       acceptance = "Capacity reserved for the period; " + (retRollover === "yes" ? "unused hours roll over." : "unused hours expire.");
-      milestones = Array.from({ length: retDuration }, (_, i) => ({
-        ...emptyMilestone(i, `Month ${i + 1}`),
-        deliverable: retCapacity,
-        due: isoDaysFromNow(30 * (i + 1)),
-        amount: Number(retFee) || 0,
-      }));
-      total = Number(retFee) * retDuration;
+      milestones = Array.from({ length: retDuration }, (_, i) =>
+        toLocalMilestone(
+          { index: i, name: `Month ${i + 1}`, deliverable: retCapacity, due: isoDaysFromNow(30 * (i + 1)), amount: Number(retFee) || 0 },
+          false,
+        )
+      );
+      total = (Number(retFee) || 0) * retDuration;
       fields = {
         "pact:type": "retainer",
         "pact:monthly": String(retFee),
@@ -185,12 +221,12 @@ export default function TemplateFormPage() {
       scope = `${tmRate} USDC / ${tmUnit}, est. ${tmEstHours} ${tmUnit}s`;
       acceptance = "48h window per billing period; auto-releases if not disputed.";
       const periods = 4;
-      milestones = Array.from({ length: periods }, (_, i) => ({
-        ...emptyMilestone(i, `Billing period ${i + 1}`),
-        deliverable: "Time log for the period",
-        due: isoDaysFromNow((i + 1) * (tmCadence === "weekly" ? 7 : tmCadence === "biweekly" ? 14 : 30)),
-        amount: Number(tmCeiling) / periods,
-      }));
+      milestones = Array.from({ length: periods }, (_, i) =>
+        toLocalMilestone(
+          { index: i, name: `Billing period ${i + 1}`, deliverable: "Time log for the period", due: isoDaysFromNow((i + 1) * (tmCadence === "weekly" ? 7 : tmCadence === "biweekly" ? 14 : 30)), amount: (Number(tmCeiling) || 0) / periods },
+          false,
+        )
+      );
       total = Number(tmCeiling) || 0;
       fields = {
         "pact:type": "t-and-m",
@@ -203,13 +239,13 @@ export default function TemplateFormPage() {
       scope = rcDeliverable;
       acceptance = "48h acceptance window per period; auto-releases if not disputed.";
       const rows = Math.min(rcPeriods, 24);
-      milestones = Array.from({ length: rows }, (_, i) => ({
-        ...emptyMilestone(i, `Delivery period ${i + 1}`),
-        deliverable: rcDeliverable,
-        due: isoDaysFromNow((i + 1) * (rcPeriod === "weekly" ? 7 : rcPeriod === "monthly" ? 30 : 90)),
-        amount: Number(rcPerPeriod) || 0,
-      }));
-      total = Number(rcPerPeriod) * rows;
+      milestones = Array.from({ length: rows }, (_, i) =>
+        toLocalMilestone(
+          { index: i, name: `Delivery period ${i + 1}`, deliverable: rcDeliverable, due: isoDaysFromNow((i + 1) * (rcPeriod === "weekly" ? 7 : rcPeriod === "monthly" ? 30 : 90)), amount: Number(rcPerPeriod) || 0 },
+          false,
+        )
+      );
+      total = (Number(rcPerPeriod) || 0) * rows;
       fields = {
         "pact:type": "recurring",
         "pact:deliverable": rcDeliverable,
@@ -225,56 +261,48 @@ export default function TemplateFormPage() {
       splitShareA = spShareA * 100;
       splitShareB = (100 - spShareA) * 100;
       milestones = [
-        {
-          ...emptyMilestone(0, "Joint delivery"),
-          deliverable: spScope,
-          due: new Date(spDue).toISOString(),
-          amount: total,
-          worldRequired: total >= WORLD_THRESHOLD,
-        },
+        toLocalMilestone(
+          { index: 0, name: "Joint delivery", deliverable: spScope, due: spDue, amount: total },
+          total >= WORLD_THRESHOLD,
+        ),
       ];
       fields = {
         "pact:type": "split",
         "pact:joint-scope": spScope,
-        "pact:party-a": `${currentBusiness?.ensSubname} / ${spShareA}%`,
-        "pact:party-b": `${slugify(counterpartySlug)}.pact-hack.eth / ${100 - spShareA}%`,
+        "pact:party-a": `${spShareA}%`,
+        "pact:party-b": `${100 - spShareA}%`,
         "pact:total": String(total),
         "pact:client": spClientEns,
       };
     } else {
-      // custom
+      templateIndex = customTemplateIndex(cQ2);
       title = cQ3 ? cQ3.slice(0, 48) : "Custom engagement";
       scope = cQ3;
       acceptance = cQ4;
       total = Number(cQ5) || 0;
       if (cQ2 === "By milestone") {
         const per = total / Math.max(cPhases, 1);
-        milestones = Array.from({ length: cPhases }, (_, i) => ({
-          ...emptyMilestone(i, `Phase ${i + 1}`),
-          deliverable: cQ3,
-          due: isoDaysFromNow((i + 1) * 14),
-          amount: per,
-          worldRequired: cWorld === "yes",
-        }));
+        milestones = Array.from({ length: cPhases }, (_, i) =>
+          toLocalMilestone(
+            { index: i, name: `Phase ${i + 1}`, deliverable: cQ3, due: isoDaysFromNow((i + 1) * 14), amount: per },
+            cWorld === "yes",
+          )
+        );
       } else if (cQ2 === "By time" || cQ2 === "Recurring") {
         const periods = 4;
         const per = total / periods;
-        milestones = Array.from({ length: periods }, (_, i) => ({
-          ...emptyMilestone(i, `Period ${i + 1}`),
-          deliverable: cQ3,
-          due: isoDaysFromNow((i + 1) * 14),
-          amount: per,
-          worldRequired: cWorld === "yes",
-        }));
+        milestones = Array.from({ length: periods }, (_, i) =>
+          toLocalMilestone(
+            { index: i, name: `Period ${i + 1}`, deliverable: cQ3, due: isoDaysFromNow((i + 1) * 14), amount: per },
+            cWorld === "yes",
+          )
+        );
       } else {
         milestones = [
-          {
-            ...emptyMilestone(0, "Delivery"),
-            deliverable: cQ3,
-            due: isoDaysFromNow(21),
-            amount: total,
-            worldRequired: cWorld === "yes" || total >= WORLD_THRESHOLD,
-          },
+          toLocalMilestone(
+            { index: 0, name: "Delivery", deliverable: cQ3, due: isoDaysFromNow(21), amount: total },
+            cWorld === "yes" || total >= WORLD_THRESHOLD,
+          ),
         ];
       }
       fields = {
@@ -287,49 +315,22 @@ export default function TemplateFormPage() {
       };
     }
 
-    return { title, scope, acceptance, milestones, total, fields, splitShareA, splitShareB };
+    return { title, scope, acceptance, milestones, total, fields, splitShareA, splitShareB, templateIndex };
   }, [
-    type,
-    fixedDeliverable,
-    fixedDeadline,
-    fixedAcceptance,
-    fixedAmount,
-    msProject,
-    msAcceptance,
-    msRows,
-    retFee,
-    retCapacity,
-    retRollover,
-    retDuration,
-    tmRate,
-    tmUnit,
-    tmEstHours,
-    tmCeiling,
-    tmCadence,
-    rcDeliverable,
-    rcPeriod,
-    rcPerPeriod,
-    rcPeriods,
-    spScope,
-    spClientEns,
-    spShareA,
-    spTotal,
-    spDue,
-    cQ1,
-    cQ2,
-    cQ3,
-    cQ4,
-    cQ5,
-    cPhases,
-    cWorld,
-    counterpartySlug,
-    currentBusiness,
+    type, meta,
+    fixedDeliverable, fixedDeadline, fixedAcceptance, fixedAmount,
+    msProject, msAcceptance, msRows,
+    retFee, retCapacity, retRollover, retDuration,
+    tmRate, tmUnit, tmEstHours, tmCeiling, tmCadence,
+    rcDeliverable, rcPeriod, rcPerPeriod, rcPeriods,
+    spScope, spClientEns, spShareA, spTotal, spDue,
+    cQ1, cQ2, cQ3, cQ4, cQ5, cPhases, cWorld,
   ]);
 
-  if (!currentBusiness) {
+  if (!walletAddress) {
     return (
       <div className="py-16">
-        <p>You need an identity first.</p>
+        <p className="text-ink-body">You need an identity first.</p>
         <button onClick={() => router.push("/identity")} className="btn-primary mt-4">
           Set up identity
         </button>
@@ -337,34 +338,60 @@ export default function TemplateFormPage() {
     );
   }
 
-  if (!meta) return <div className="py-16">Unknown template.</div>;
+  if (!meta) return <div className="py-16 text-ink-body">Unknown template.</div>;
 
   const canPreview =
-    counterpartySlug.trim().length > 1 && draft.total > 0 && draft.scope.trim().length > 0;
+    draft.total > 0 && draft.scope.trim().length > 0;
 
-  function sendProposal() {
-    const engagement = createProposal({
-      title: draft.title,
-      scope: draft.scope,
-      acceptanceCriteria: draft.acceptance,
-      partyAId: currentBusiness!.id,
-      partyBSlug: slugify(counterpartySlug),
-      totalAmount: draft.total,
-      milestones: draft.milestones,
-      acceptanceWindowHours: windowHours,
-      templateType: type,
-      splitShareA: draft.splitShareA,
-      splitShareB: draft.splitShareB,
-      fields: draft.fields,
-    });
-    pushToast("Proposal created. Terms are staged for ENS.", "ink");
-    router.push(`/proposal/${engagement.id}`);
+  async function sendProposal() {
+    if (!walletAddress) return;
+    setSending(true);
+    try {
+      const res = await api.createProposal({
+        templateType: draft.templateIndex,
+        title: draft.title,
+        scope: draft.scope,
+        acceptanceCriteria: draft.acceptance,
+        totalAmount: draft.total,
+        acceptanceWindowHours: windowHours,
+        milestones: draft.milestones.map(toApiMilestone),
+        fields: {
+          ...draft.fields,
+          "pact:party-b": `${slugify(counterpartySlug || "counterparty")}.pact.eth`,
+        },
+        splitShareA: draft.splitShareA,
+        splitShareB: draft.splitShareB,
+      });
+      saveProposalSnapshot({
+        token: res.token,
+        title: draft.title,
+        scope: draft.scope,
+        acceptanceCriteria: draft.acceptance,
+        totalAmount: draft.total,
+        termsHash: res.termsHash,
+        templateType: draft.templateIndex,
+        templateName: meta?.name ?? type,
+        counterparty: slugify(counterpartySlug || "counterparty"),
+        proposerWallet: walletAddress,
+        visibility: "public",
+        milestones: draft.milestones,
+      });
+      pushToast("Proposal created — link ready to share.", "accent");
+      router.push(`/proposal/${res.token}`);
+    } catch (err) {
+      pushToast(
+        err instanceof ApiError ? `Proposal failed (${err.code ?? err.status}).` : "Proposal failed.",
+        "danger",
+      );
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
     <div className="py-14 max-w-3xl">
-      <p className="mono-tag text-ink-faint mb-2">Template {meta.index}</p>
-      <h1 className="font-serif text-3xl mb-8">{meta.name}</h1>
+      <p className="mono-tag text-accent mb-2">Template {meta.index}</p>
+      <h1 className="text-3xl font-medium tracking-[-0.8px] mb-8 text-ink">{meta.name}</h1>
 
       {stage === "form" && (
         <div className="space-y-8">
@@ -406,22 +433,22 @@ export default function TemplateFormPage() {
             }}
           />
 
-          <div className="border-t border-rule pt-6">
-            <label className="block text-sm mb-2">Counterparty ENS slug</label>
+          <div className="border-t border-line pt-6">
+            <label className="block text-sm mb-2 text-ink-body">Counterparty ENS slug</label>
             <input
               className="field-input"
               placeholder="e.g. north-supply"
               value={counterpartySlug}
               onChange={(e) => setCounterpartySlug(e.target.value)}
             />
-            <p className="mono-tag text-ink-faint mt-1">
-              {slugify(counterpartySlug || "counterparty")}.pact-hack.eth
+            <p className="mono-tag text-accent mt-2">
+              {slugify(counterpartySlug || "counterparty")}.pact.eth
             </p>
           </div>
 
           {(type === "fixed" || type === "milestone" || type === "split") && (
             <div>
-              <label className="block text-sm mb-2">Acceptance window before auto-release fallback</label>
+              <label className="block text-sm mb-2 text-ink-body">Acceptance window before auto-release fallback</label>
               <select
                 className="field-input"
                 value={windowHours}
@@ -435,7 +462,7 @@ export default function TemplateFormPage() {
           )}
 
           <div className="flex justify-between items-center pt-4">
-            <p className="text-sm text-ink-faint">
+            <p className="text-sm text-ink-mute">
               Total: <span className="font-mono text-ink">{formatUSDC(draft.total)} USDC</span>
             </p>
             <button
@@ -451,15 +478,14 @@ export default function TemplateFormPage() {
 
       {stage === "preview" && (
         <div className="space-y-6">
-          <p className="text-sm text-ink-soft">
+          <p className="text-sm text-ink-body">
             These are the exact terms going on-chain. Both parties can verify
             them at any time by resolving the ENS name.
           </p>
           <TerminalBlock
             records={Object.entries({
               ...draft.fields,
-              "pact:party-a": currentBusiness.ensSubname,
-              "pact:party-b": `${slugify(counterpartySlug)}.pact-hack.eth (set when they sign)`,
+              "pact:party-b": `${slugify(counterpartySlug || "counterparty")}.pact.eth (set when they sign)`,
               "pact:status": "proposed",
             })}
           />
@@ -467,8 +493,8 @@ export default function TemplateFormPage() {
             <button onClick={() => setStage("form")} className="btn-ghost">
               ← Edit
             </button>
-            <button onClick={sendProposal} className="btn-primary">
-              Send proposal →
+            <button onClick={() => void sendProposal()} disabled={sending} className="btn-primary">
+              {sending ? "Sending..." : "Send proposal →"}
             </button>
           </div>
         </div>
@@ -478,11 +504,50 @@ export default function TemplateFormPage() {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Field sets per template. Kept in one file since each is small and the  */
-/* branching lives entirely on the discriminant `type`.                   */
-/* ---------------------------------------------------------------------- */
 
-function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
+interface FormState {
+  fixedDeliverable: string; setFixedDeliverable: (v: string) => void;
+  fixedDeadline: string; setFixedDeadline: (v: string) => void;
+  fixedAcceptance: string; setFixedAcceptance: (v: string) => void;
+  fixedAmount: number; setFixedAmount: (v: number) => void;
+  msProject: string; setMsProject: (v: string) => void;
+  msAcceptance: string; setMsAcceptance: (v: string) => void;
+  msRows: FormMilestone[];
+  updateRow: (i: number, patch: Partial<FormMilestone>) => void;
+  addRow: () => void; removeRow: (i: number) => void;
+  retFee: number; setRetFee: (v: number) => void;
+  retCapacity: string; setRetCapacity: (v: string) => void;
+  retRollover: "yes" | "no"; setRetRollover: (v: "yes" | "no") => void;
+  retDuration: number; setRetDuration: (v: number) => void;
+  tmRate: number; setTmRate: (v: number) => void;
+  tmUnit: "hour" | "day"; setTmUnit: (v: "hour" | "day") => void;
+  tmEstHours: number; setTmEstHours: (v: number) => void;
+  tmCeiling: number; setTmCeiling: (v: number) => void;
+  tmCadence: "weekly" | "biweekly" | "monthly"; setTmCadence: (v: "weekly" | "biweekly" | "monthly") => void;
+  rcDeliverable: string; setRcDeliverable: (v: string) => void;
+  rcPeriod: "weekly" | "monthly" | "quarterly"; setRcPeriod: (v: "weekly" | "monthly" | "quarterly") => void;
+  rcPerPeriod: number; setRcPerPeriod: (v: number) => void;
+  rcPeriods: number; setRcPeriods: (v: number) => void;
+  spScope: string; setSpScope: (v: string) => void;
+  spClientEns: string; setSpClientEns: (v: string) => void;
+  spShareA: number; setSpShareA: (v: number) => void;
+  spTotal: number; setSpTotal: (v: number) => void;
+  spDue: string; setSpDue: (v: string) => void;
+  cQ1: string; setCQ1: (v: string) => void;
+  cQ2: string; setCQ2: (v: string) => void;
+  cQ3: string; setCQ3: (v: string) => void;
+  cQ4: string; setCQ4: (v: string) => void;
+  cQ5: number; setCQ5: (v: number) => void;
+  cPhases: number; setCPhases: (v: number) => void;
+  cWorld: "yes" | "no"; setCWorld: (v: "yes" | "no") => void;
+}
+
+function TemplateFields({ type, state }: { type: TemplateType; state: FormState }) {
+  const num = (fn: (v: number) => void) => (e: InputEvent) =>
+    fn(Number((e.target as HTMLInputElement).value));
+  const str = (fn: (v: string) => void) => (e: InputEvent) =>
+    fn((e.target as HTMLInputElement).value);
+
   if (type === "fixed") {
     return (
       <div className="space-y-5">
@@ -492,7 +557,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             maxLength={500}
             rows={3}
             value={state.fixedDeliverable}
-            onChange={(e: any) => state.setFixedDeliverable(e.target.value)}
+            onChange={str(state.setFixedDeliverable)}
             placeholder="Full brand identity: logo, type system, color, guidelines PDF"
           />
         </Field>
@@ -501,7 +566,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             type="date"
             className="field-input"
             value={state.fixedDeadline}
-            onChange={(e: any) => state.setFixedDeadline(e.target.value)}
+            onChange={str(state.setFixedDeadline)}
           />
         </Field>
         <Field label="How do both parties know it's done?">
@@ -510,7 +575,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             maxLength={300}
             rows={2}
             value={state.fixedAcceptance}
-            onChange={(e: any) => state.setFixedAcceptance(e.target.value)}
+            onChange={str(state.setFixedAcceptance)}
             placeholder="Client approves final files in writing within 5 business days"
           />
         </Field>
@@ -519,10 +584,10 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             type="number"
             className="field-input"
             value={state.fixedAmount}
-            onChange={(e: any) => state.setFixedAmount(Number(e.target.value))}
+            onChange={num(state.setFixedAmount)}
           />
         </Field>
-        <p className="text-xs text-ink-faint">50% escrows on signature, 50% releases on delivery acceptance.</p>
+        <p className="text-xs text-ink-mute">50% escrows on signature, 50% releases on delivery acceptance.</p>
       </div>
     );
   }
@@ -534,19 +599,19 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           <input
             className="field-input"
             value={state.msProject}
-            onChange={(e: any) => state.setMsProject(e.target.value)}
+            onChange={str(state.setMsProject)}
             placeholder="Website redesign"
           />
         </Field>
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-sm">Milestones ({state.msRows.length}/5)</label>
-            <button type="button" onClick={state.addRow} className="text-xs text-slate">
+            <label className="text-sm text-ink-body">Milestones ({state.msRows.length}/5)</label>
+            <button type="button" onClick={state.addRow} className="text-xs text-accent">
               + Add milestone
             </button>
           </div>
           <div className="space-y-3">
-            {state.msRows.map((m: Milestone) => (
+            {state.msRows.map((m) => (
               <div key={m.index} className="grid grid-cols-12 gap-2 items-start">
                 <input
                   className="field-input col-span-4"
@@ -576,7 +641,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
                 <button
                   type="button"
                   onClick={() => state.removeRow(m.index)}
-                  className="col-span-1 text-ink-faint text-sm hover:text-danger"
+                  className="col-span-1 text-ink-mute text-sm hover:text-danger"
                 >
                   ×
                 </button>
@@ -589,11 +654,11 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             className="field-input"
             rows={2}
             value={state.msAcceptance}
-            onChange={(e: any) => state.setMsAcceptance(e.target.value)}
+            onChange={str(state.setMsAcceptance)}
             placeholder="Client reviews and signs off within 5 days of delivery"
           />
         </Field>
-        <p className="text-xs text-ink-faint">
+        <p className="text-xs text-ink-mute">
           Milestones at or above {formatUSDC(WORLD_THRESHOLD)} require a World selfie at acceptance.
         </p>
       </div>
@@ -608,14 +673,14 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             type="number"
             className="field-input"
             value={state.retFee}
-            onChange={(e: any) => state.setRetFee(Number(e.target.value))}
+            onChange={num(state.setRetFee)}
           />
         </Field>
         <Field label="What capacity is reserved?">
           <input
             className="field-input"
             value={state.retCapacity}
-            onChange={(e: any) => state.setRetCapacity(e.target.value)}
+            onChange={str(state.setRetCapacity)}
             placeholder="20 hours/month of design support"
           />
         </Field>
@@ -623,7 +688,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           <select
             className="field-input"
             value={state.retRollover}
-            onChange={(e: any) => state.setRetRollover(e.target.value)}
+            onChange={(e) => state.setRetRollover(e.target.value as "yes" | "no")}
           >
             <option value="no">Expires</option>
             <option value="yes">Rolls over</option>
@@ -636,11 +701,11 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             max={12}
             className="field-input"
             value={state.retDuration}
-            onChange={(e: any) => state.setRetDuration(Number(e.target.value))}
+            onChange={num(state.setRetDuration)}
           />
         </Field>
-        <p className="text-xs text-ink-faint">
-          First month escrows on signature. A Privy session signer auto-releases each following month.
+        <p className="text-xs text-ink-mute">
+          First month escrows on signature. A session signer auto-releases each following month.
         </p>
       </div>
     );
@@ -655,14 +720,14 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
               type="number"
               className="field-input"
               value={state.tmRate}
-              onChange={(e: any) => state.setTmRate(Number(e.target.value))}
+              onChange={num(state.setTmRate)}
             />
           </Field>
           <Field label="Per">
             <select
               className="field-input"
               value={state.tmUnit}
-              onChange={(e: any) => state.setTmUnit(e.target.value)}
+              onChange={(e) => state.setTmUnit(e.target.value as "hour" | "day")}
             >
               <option value="hour">Hour</option>
               <option value="day">Day</option>
@@ -674,7 +739,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             type="number"
             className="field-input"
             value={state.tmEstHours}
-            onChange={(e: any) => state.setTmEstHours(Number(e.target.value))}
+            onChange={num(state.setTmEstHours)}
           />
         </Field>
         <Field label="Hard budget ceiling (USDC — pre-funded to this amount)">
@@ -682,21 +747,21 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             type="number"
             className="field-input"
             value={state.tmCeiling}
-            onChange={(e: any) => state.setTmCeiling(Number(e.target.value))}
+            onChange={num(state.setTmCeiling)}
           />
         </Field>
         <Field label="Billing cadence">
           <select
             className="field-input"
             value={state.tmCadence}
-            onChange={(e: any) => state.setTmCadence(e.target.value)}
+            onChange={(e) => state.setTmCadence(e.target.value as "weekly" | "biweekly" | "monthly")}
           >
             <option value="weekly">Weekly</option>
             <option value="biweekly">Biweekly</option>
             <option value="monthly">Monthly</option>
           </select>
         </Field>
-        <p className="text-xs text-ink-faint">
+        <p className="text-xs text-ink-mute">
           Client has 48h to dispute each period; otherwise a session signer auto-releases.
         </p>
       </div>
@@ -710,7 +775,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           <input
             className="field-input"
             value={state.rcDeliverable}
-            onChange={(e: any) => state.setRcDeliverable(e.target.value)}
+            onChange={str(state.setRcDeliverable)}
             placeholder="Weekly performance report"
           />
         </Field>
@@ -718,7 +783,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           <select
             className="field-input"
             value={state.rcPeriod}
-            onChange={(e: any) => state.setRcPeriod(e.target.value)}
+            onChange={(e) => state.setRcPeriod(e.target.value as "weekly" | "monthly" | "quarterly")}
           >
             <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
@@ -731,7 +796,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
               type="number"
               className="field-input"
               value={state.rcPerPeriod}
-              onChange={(e: any) => state.setRcPerPeriod(Number(e.target.value))}
+              onChange={num(state.setRcPerPeriod)}
             />
           </Field>
           <Field label="Duration (periods, 1-24)">
@@ -741,7 +806,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
               max={24}
               className="field-input"
               value={state.rcPeriods}
-              onChange={(e: any) => state.setRcPeriods(Number(e.target.value))}
+              onChange={num(state.setRcPeriods)}
             />
           </Field>
         </div>
@@ -757,7 +822,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             className="field-input"
             rows={2}
             value={state.spScope}
-            onChange={(e: any) => state.setSpScope(e.target.value)}
+            onChange={str(state.setSpScope)}
             placeholder="Joint pitch and delivery of a rebrand + microsite for the client"
           />
         </Field>
@@ -765,8 +830,8 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           <input
             className="field-input"
             value={state.spClientEns}
-            onChange={(e: any) => state.setSpClientEns(e.target.value)}
-            placeholder="reef-client.pact-hack.eth"
+            onChange={str(state.setSpClientEns)}
+            placeholder="reef-client.pact.eth"
           />
         </Field>
         <Field label={`Your share: ${state.spShareA}% · Co-provider: ${100 - state.spShareA}%`}>
@@ -774,9 +839,9 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             type="range"
             min={1}
             max={99}
-            className="w-full"
+            className="w-full accent-[#2DD4BF]"
             value={state.spShareA}
-            onChange={(e: any) => state.setSpShareA(Number(e.target.value))}
+            onChange={num(state.setSpShareA)}
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
@@ -785,7 +850,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
               type="number"
               className="field-input"
               value={state.spTotal}
-              onChange={(e: any) => state.setSpTotal(Number(e.target.value))}
+              onChange={num(state.setSpTotal)}
             />
           </Field>
           <Field label="Due date">
@@ -793,22 +858,21 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
               type="date"
               className="field-input"
               value={state.spDue}
-              onChange={(e: any) => state.setSpDue(e.target.value)}
+              onChange={str(state.setSpDue)}
             />
           </Field>
         </div>
-        <p className="text-xs text-ink-faint">
-          Counterparty ENS slug below is your co-provider — the peer you're splitting with, not the client.
+        <p className="text-xs text-ink-mute">
+          Counterparty ENS slug below is your co-provider — the peer you&rsquo;re splitting with, not the client.
         </p>
       </div>
     );
   }
 
-  // custom builder
   return (
     <div className="space-y-5">
       <Field label="Q1 — What kind of work is this?">
-        <select className="field-input" value={state.cQ1} onChange={(e: any) => state.setCQ1(e.target.value)}>
+        <select className="field-input" value={state.cQ1} onChange={str(state.setCQ1)}>
           <option>Service</option>
           <option>Product</option>
           <option>Joint delivery</option>
@@ -817,7 +881,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
         </select>
       </Field>
       <Field label="Q2 — How is payment structured?">
-        <select className="field-input" value={state.cQ2} onChange={(e: any) => state.setCQ2(e.target.value)}>
+        <select className="field-input" value={state.cQ2} onChange={str(state.setCQ2)}>
           <option>All upfront</option>
           <option>On completion</option>
           <option>By milestone</option>
@@ -831,7 +895,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           maxLength={800}
           rows={3}
           value={state.cQ3}
-          onChange={(e: any) => state.setCQ3(e.target.value)}
+          onChange={str(state.setCQ3)}
         />
       </Field>
       <Field
@@ -843,7 +907,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           maxLength={400}
           rows={2}
           value={state.cQ4}
-          onChange={(e: any) => state.setCQ4(e.target.value)}
+          onChange={str(state.setCQ4)}
         />
       </Field>
       <Field label="Q5 — Total USDC amount">
@@ -851,7 +915,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
           type="number"
           className="field-input"
           value={state.cQ5}
-          onChange={(e: any) => state.setCQ5(Number(e.target.value))}
+          onChange={num(state.setCQ5)}
         />
       </Field>
       {state.cQ2 === "By milestone" && (
@@ -862,12 +926,12 @@ function TemplateFields({ type, state }: { type: TemplateType; state: any }) {
             max={5}
             className="field-input"
             value={state.cPhases}
-            onChange={(e: any) => state.setCPhases(Number(e.target.value))}
+            onChange={num(state.setCPhases)}
           />
         </Field>
       )}
       <Field label="Q6 — World selfie required on acceptance?">
-        <select className="field-input" value={state.cWorld} onChange={(e: any) => state.setCWorld(e.target.value)}>
+        <select className="field-input" value={state.cWorld} onChange={(e) => state.setCWorld(e.target.value as "yes" | "no")}>
           <option value="no">No</option>
           <option value="yes">Yes</option>
         </select>
@@ -887,9 +951,9 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-sm mb-2">{label}</label>
+      <label className="block text-sm mb-2 text-ink-body">{label}</label>
       {children}
-      {hint && <p className="text-xs text-ink-faint mt-1">{hint}</p>}
+      {hint && <p className="text-xs text-ink-mute mt-1">{hint}</p>}
     </div>
   );
 }
