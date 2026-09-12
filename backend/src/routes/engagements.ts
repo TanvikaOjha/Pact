@@ -2,11 +2,14 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { z } from "zod";
 
 import type { BusinessStore } from "../repos/businesses.js";
-import type { EngagementRow, EngagementStore, MilestoneStore } from "../repos/engagements.js";
+import type {
+  EngagementRow,
+  EngagementStore,
+  MilestoneRow,
+  MilestoneStore,
+} from "../repos/engagements.js";
 import { log } from "../services/log.js";
-
-/** Default acceptance window (spec Q2 default). Per-engagement terms override later. */
-export const ACCEPTANCE_WINDOW_HOURS = 48;
+import { releaseAfter } from "../services/scheduler.js";
 
 const milestoneInputSchema = z.object({
   index: z.number().int().min(0),
@@ -30,14 +33,12 @@ export interface EngagementsRouteOptions {
   engagements: EngagementStore;
   milestones: MilestoneStore;
   businesses: BusinessStore;
+  /** Null when escrow reads are unavailable; recording proceeds (dev/offchain path). */
+  checkReleased: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
 
 function isParty(engagement: EngagementRow, businessId: string): boolean {
   return engagement.party_a_id === businessId || engagement.party_b_id === businessId;
-}
-
-export function releaseAfter(submittedAt: string): string {
-  return new Date(Date.parse(submittedAt) + ACCEPTANCE_WINDOW_HOURS * 3600 * 1000).toISOString();
 }
 
 /**
@@ -55,6 +56,9 @@ export function createEngagementsRouter(options: EngagementsRouteOptions): Route
   });
   router.post("/engagements/:id/milestones/:index/submit", (req: Request, res: Response, next: NextFunction) => {
     void handleSubmit(req, res, options).catch(next);
+  });
+  router.post("/engagements/:id/milestones/:index/release", (req: Request, res: Response, next: NextFunction) => {
+    void handleRelease(req, res, options).catch(next);
   });
   return router;
 }
@@ -172,4 +176,84 @@ async function handleSubmit(
   await options.milestones.markSubmitted(milestone.id, submittedAt);
   log.info(`completion submitted: engagement ${engagement.id} milestone ${index}`);
   res.json({ submittedAt, releaseAfter: releaseAfter(submittedAt) });
+}
+
+async function loadMilestoneContext(
+  req: Request,
+  res: Response,
+  options: EngagementsRouteOptions,
+): Promise<
+  | { ok: false }
+  | { ok: true; engagement: EngagementRow; milestone: MilestoneRow; index: number }
+> {
+  const identity = req.identity;
+  if (identity === undefined) {
+    res.status(401).json({ error: "missing_identity" });
+    return { ok: false };
+  }
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 0) {
+    res.status(404).json({ error: "milestone_not_found" });
+    return { ok: false };
+  }
+  const engagement = await options.engagements.findById(req.params.id ?? "");
+  if (engagement === null) {
+    res.status(404).json({ error: "engagement_not_found" });
+    return { ok: false };
+  }
+  const business = await options.businesses.findByWallet(identity.walletAddress);
+  if (business === null || !isParty(engagement, business.id)) {
+    res.status(403).json({ error: "not_a_party" });
+    return { ok: false };
+  }
+  const milestone = await options.milestones.findByIndex(engagement.id, index);
+  if (milestone === null) {
+    res.status(404).json({ error: "milestone_not_found" });
+    return { ok: false };
+  }
+  return { ok: true, engagement, milestone, index };
+}
+
+/**
+ * Record an on-chain milestone release in the mirror. When escrow reads are
+ * available the chain must confirm `released`, otherwise nothing is recorded.
+ * Completes the engagement once every milestone is released.
+ */
+async function handleRelease(
+  req: Request,
+  res: Response,
+  options: EngagementsRouteOptions,
+): Promise<void> {
+  const context = await loadMilestoneContext(req, res, options);
+  if (!context.ok) return;
+  const { engagement, milestone, index } = context;
+  if (milestone.disputed) {
+    res.status(409).json({ error: "milestone_disputed" });
+    return;
+  }
+  if (milestone.released_at !== null) {
+    res.status(409).json({ error: "already_released" });
+    return;
+  }
+  if (milestone.submitted_at === null) {
+    res.status(409).json({ error: "not_submitted" });
+    return;
+  }
+  if (options.checkReleased !== null) {
+    const released = await options.checkReleased(engagement.on_chain_id, index);
+    if (released === false) {
+      res.status(409).json({ error: "not_released_onchain" });
+      return;
+    }
+  }
+  const releasedAt = new Date().toISOString();
+  await options.milestones.markReleased(milestone.id, releasedAt);
+  const remaining = await options.milestones.listByEngagement(engagement.id);
+  const engagementCompleted =
+    remaining.length > 0 && remaining.every((candidate) => candidate.released_at !== null);
+  if (engagementCompleted) {
+    await options.engagements.updateStatus(engagement.id, "COMPLETED");
+  }
+  log.info(`milestone released: engagement ${engagement.id} milestone ${index}`);
+  res.json({ releasedAt, engagementCompleted });
 }

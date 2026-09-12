@@ -98,6 +98,7 @@ backend/
     config/env.ts        zod env schema + loadEnv() (envFlag() for booleans)
     config/supabase.ts   Supabase client
     chain/registry.ts    viem read-only Registry access (isBusinessActive; null when unconfigured)
+    chain/escrow.ts      viem read-only Escrow access (milestones released flag; null when unconfigured)
     middleware/http.ts   requestId + errorHandler
     middleware/privyAuth.ts  Identity + createRequireAuth (Bearer via @privy-io/node;
     dev-header privyAuthStub only when ALLOW_DEV_AUTH=true)
@@ -114,7 +115,10 @@ backend/
     GET /api/proposals/:token (public link view, 410 past expiry)
     routes/engagements.ts POST /api/engagements (mirror intent row) +
     POST /api/engagements/:id/milestones/:index/submit (completion notice,
-    starts 48h acceptance window; release itself is on-chain, next commit)
+    starts 48h acceptance window) + .../release (mirror on-chain release,
+    chain-verified when configured; completes engagement on last release)
+    routes/scheduler.ts  POST /api/scheduler/sweep (due-release detection;
+    execution via session signer follows)
     repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
     repos/proposals.ts   ProposalStore (ephemeral drafts, 14d TTL)
     repos/engagements.ts EngagementStore + MilestoneStore (chain is authoritative)
@@ -122,6 +126,7 @@ backend/
                          root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)
     services/world.ts    portal verify via fetch to v4/verify/{rp_id} + zod parsing
+    services/scheduler.ts ACCEPTANCE_WINDOW_HOURS + releaseAfter + findDueReleases (pure)
     types/express.d.ts   Request augmentation
     repos/ens/         repos has businesses.ts; ens/ has pact-terms.ts (more ports
                          only after root scripts stabilize — never fork them)

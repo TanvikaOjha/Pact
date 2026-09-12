@@ -33,6 +33,11 @@ export interface EngagementStore {
   updateStatus(id: string, status: EngagementStatus): Promise<EngagementRow | null>;
 }
 
+export interface EngagementStatusPatch {
+  status: EngagementStatus;
+  completed_at?: string;
+}
+
 export interface MilestoneRow {
   id: string;
   engagement_id: string;
@@ -58,9 +63,11 @@ export interface NewMilestone {
 
 export interface MilestoneStore {
   listByEngagement(engagementId: string): Promise<MilestoneRow[]>;
+  listSubmittedUnreleased(): Promise<MilestoneRow[]>;
   findByIndex(engagementId: string, index: number): Promise<MilestoneRow | null>;
   insertMany(milestones: NewMilestone[]): Promise<MilestoneRow[]>;
   markSubmitted(id: string, submittedAt: string): Promise<MilestoneRow | null>;
+  markReleased(id: string, releasedAt: string): Promise<MilestoneRow | null>;
 }
 
 function firstRow<T>(rows: T[] | null): T | null {
@@ -108,9 +115,13 @@ export function createSupabaseEngagementStore(client: SupabaseClient): Engagemen
       return row;
     },
     async updateStatus(id: string, status: EngagementStatus): Promise<EngagementRow | null> {
+      const patch: EngagementStatusPatch = { status };
+      if (status === "COMPLETED") {
+        patch.completed_at = new Date().toISOString();
+      }
       const result = await client
         .from("engagements")
-        .update({ status })
+        .update(patch)
         .eq("id", id)
         .select()
         .returns<EngagementRow[]>();
@@ -128,6 +139,17 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
         .select("*")
         .eq("engagement_id", engagementId)
         .order("index")
+        .returns<MilestoneRow[]>();
+      if (result.error) throw new Error(`milestone lookup failed: ${result.error.message}`);
+      return result.data ?? [];
+    },
+    async listSubmittedUnreleased(): Promise<MilestoneRow[]> {
+      const result = await client
+        .from("milestones")
+        .select("*")
+        .not("submitted_at", "is", null)
+        .is("released_at", null)
+        .eq("disputed", false)
         .returns<MilestoneRow[]>();
       if (result.error) throw new Error(`milestone lookup failed: ${result.error.message}`);
       return result.data ?? [];
@@ -166,6 +188,16 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
       const result = await client
         .from("milestones")
         .update({ submitted_at: submittedAt })
+        .eq("id", id)
+        .select()
+        .returns<MilestoneRow[]>();
+      if (result.error) throw new Error(`milestone update failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async markReleased(id: string, releasedAt: string): Promise<MilestoneRow | null> {
+      const result = await client
+        .from("milestones")
+        .update({ released_at: releasedAt })
         .eq("id", id)
         .select()
         .returns<MilestoneRow[]>();

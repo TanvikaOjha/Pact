@@ -110,6 +110,15 @@ function createMemoryMilestoneStore(): MilestoneStore {
       if (row !== null) row.submitted_at = submittedAt;
       return row;
     },
+    listSubmittedUnreleased: async () =>
+      rows.filter(
+        (row) => row.submitted_at !== null && row.released_at === null && !row.disputed,
+      ),
+    markReleased: async (id: string, releasedAt: string) => {
+      const row = rows.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) row.released_at = releasedAt;
+      return row;
+    },
   };
 }
 
@@ -120,6 +129,8 @@ interface EngagementEnvelope {
   error?: string;
   submittedAt?: string;
   releaseAfter?: string;
+  releasedAt?: string;
+  engagementCompleted?: boolean;
 }
 
 async function api(
@@ -181,6 +192,8 @@ describe("engagements", () => {
         engagements: createMemoryEngagementStore(),
         milestones: createMemoryMilestoneStore(),
         businesses: createMemoryBusinessStore(),
+        // Null chain reader: dev path records releases without on-chain proof.
+        checkReleased: null,
       }),
     );
     await new Promise<void>((resolve) => {
@@ -263,5 +276,32 @@ describe("engagements", () => {
 
     const noEngagement = await api(port, "POST", "/api/engagements/nope/milestones/0/submit", WALLET_A);
     expect(noEngagement.status).toBe(404);
+  });
+
+  test("release requires submission and completes the engagement on the last one", async () => {
+    const created = await api(port, "POST", "/api/engagements", WALLET_A, draft({ onChainId: "0xeng3" }));
+    const id = created.body.id ?? "";
+
+    const unsubmitted = await api(port, "POST", `/api/engagements/${id}/milestones/1/release`, WALLET_A);
+    expect(unsubmitted.status).toBe(409);
+    expect(unsubmitted.body.error).toBe("not_submitted");
+
+    await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+    await api(port, "POST", `/api/engagements/${id}/milestones/1/submit`, WALLET_A);
+
+    const first = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_B);
+    expect(first.status).toBe(200);
+    expect(first.body.engagementCompleted).toBe(false);
+
+    const repeat = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_A);
+    expect(repeat.status).toBe(409);
+    expect(repeat.body.error).toBe("already_released");
+
+    const last = await api(port, "POST", `/api/engagements/${id}/milestones/1/release`, WALLET_A);
+    expect(last.status).toBe(200);
+    expect(last.body.engagementCompleted).toBe(true);
+
+    const outsider = await api(port, "POST", `/api/engagements/${id}/milestones/1/release`, OUTSIDER);
+    expect(outsider.status).toBe(403);
   });
 });
