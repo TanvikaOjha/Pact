@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import type { BusinessStore } from "../repos/businesses.js";
 import type { NewReputationEvent, ReputationEventRow, ReputationStore } from "../repos/reputation.js";
-import { recordPactCompleted, startPactCompletedWatcher } from "./indexer.js";
+import { recordPactCompleted, createIndexerArchive, startPactCompletedWatcher } from "./indexer.js";
 
 function createMemoryStores() {
   const events: ReputationEventRow[] = [];
@@ -116,5 +116,73 @@ describe("indexer", () => {
     );
     expect(recorded).toBe(false);
     expect(stores.events).toHaveLength(0);
+  });
+});
+
+describe("indexer skip archive", () => {
+  test("caps at limit and keeps oldest-first order", () => {
+    const archive = createIndexerArchive(2);
+    archive.archive({
+      reason: "unknown_party_wallets",
+      engagementId: "0x01",
+      partyA: "0xAa",
+      partyB: "0xBb",
+      txHash: null,
+      archivedAt: "2026-09-12T12:00:00.000Z",
+    });
+    archive.archive({
+      reason: "unknown_party_wallets",
+      engagementId: "0x02",
+      partyA: "0xCc",
+      partyB: "0xDd",
+      txHash: "0xtx2",
+      archivedAt: "2026-09-12T12:01:00.000Z",
+    });
+    archive.archive({
+      reason: "missing_fields",
+      engagementId: "unknown",
+      partyA: "unknown",
+      partyB: "unknown",
+      txHash: null,
+      archivedAt: "2026-09-12T12:02:00.000Z",
+    });
+    const listed = archive.list();
+    expect(listed).toHaveLength(2);
+    expect(listed[0]?.engagementId).toBe("0x02");
+    expect(listed[1]?.engagementId).toBe("unknown");
+  });
+
+  test("unknown wallets archive one entry with the skip detail", async () => {
+    const stores = createMemoryStores();
+    const archive = createIndexerArchive();
+    const recorded = await recordPactCompleted(
+      { businesses: stores.businesses, reputation: stores.reputation },
+      {
+        engagementId: "0xeng",
+        partyA: "0xUnknownA",
+        partyB: "0xUnknownB",
+        templateType: 2,
+        totalValue: 7500,
+        onTime: true,
+        disputed: false,
+        txHash: null,
+      },
+      "2026-09-12T12:00:00.000Z",
+      archive,
+    );
+    expect(recorded).toBe(false);
+    expect(stores.events).toHaveLength(0);
+    expect(archive.list()).toHaveLength(1);
+    expect(archive.list()[0]).toMatchObject({
+      reason: "unknown_party_wallets",
+      engagementId: "0xeng",
+      partyA: "0xUnknownA",
+      partyB: "0xUnknownB",
+      txHash: null,
+      archivedAt: "2026-09-12T12:00:00.000Z",
+    });
+    const copy = archive.list();
+    copy.pop();
+    expect(archive.list()).toHaveLength(1);
   });
 });

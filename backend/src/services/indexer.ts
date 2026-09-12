@@ -3,7 +3,6 @@ import { sepolia } from "viem/chains";
 
 import type { BusinessStore } from "../repos/businesses.js";
 import type { NewReputationEvent, ReputationStore } from "../repos/reputation.js";
-import type { IndexerArchive } from "./indexerArchive.js";
 import { log } from "./log.js";
 
 const pactCompletedEvent = parseAbiItem(
@@ -19,6 +18,37 @@ export interface PactCompletedLog {
   onTime: boolean;
   disputed: boolean;
   txHash: string | null;
+}
+
+/** A skipped log kept for ops. The watcher stays new-events-only; this is the backlog. */
+export interface ArchivedIndexerSkip {
+  reason: string;
+  engagementId: string;
+  partyA: string;
+  partyB: string;
+  txHash: string | null;
+  archivedAt: string;
+}
+
+export interface IndexerArchive {
+  archive(entry: ArchivedIndexerSkip): void;
+  list(): ArchivedIndexerSkip[];
+}
+
+/** Append-only in-memory skip archive, capped (oldest dropped past the limit). */
+export function createIndexerArchive(limit: number = 500): IndexerArchive {
+  const entries: ArchivedIndexerSkip[] = [];
+  return {
+    archive(entry: ArchivedIndexerSkip): void {
+      entries.push(entry);
+      if (entries.length > limit) {
+        entries.splice(0, entries.length - limit);
+      }
+    },
+    list(): ArchivedIndexerSkip[] {
+      return entries.slice();
+    },
+  };
 }
 
 export interface IndexerOptions {
