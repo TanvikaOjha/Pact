@@ -9,6 +9,8 @@ const registerRequestSchema = z.object({
   slug: z.string().trim().toLowerCase().min(3).max(32).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
   /** Complete IDKit result, verified server-side before anything is stored. */
   proof: jsonValueSchema,
+  /** Optional contact for lifecycle notifications (submission, release, disputes). */
+  email: z.string().email().max(254).optional(),
 });
 
 export interface BusinessesRouteOptions {
@@ -72,7 +74,7 @@ async function handleRegister(
     res.status(400).json({ error: "invalid_request" });
     return;
   }
-  const { slug, proof } = parsed.data;
+  const { slug, proof, email } = parsed.data;
   const existing = await options.store.findByWallet(identity.walletAddress);
   if (existing !== null) {
     res.status(409).json({ error: "already_registered", ensSubname: existing.ens_subname });
@@ -106,6 +108,7 @@ async function handleRegister(
     privyWalletId: identity.privyWalletId,
     ensSubname,
     worldSessionId: sessionId,
+    email: email ?? null,
   });
   res.status(201).json({
     ensSubname,

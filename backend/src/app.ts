@@ -21,6 +21,7 @@ import { createSchedulerRouter } from "./routes/scheduler.js";
 import { createWorldRouter } from "./routes/world.js";
 import { startPactCompletedWatcher } from "./services/indexer.js";
 import { log } from "./services/log.js";
+import { createNotifier } from "./services/notifications.js";
 
 export function createApp() {
   const env = loadEnv();
@@ -38,6 +39,7 @@ export function createApp() {
     allowDevAuth: env.ALLOW_DEV_AUTH,
     verifier: privyClient === null ? null : createPrivyVerifier(privyClient),
   });
+  const notify = createNotifier(env.RESEND_API_KEY, env.NOTIFY_FROM_EMAIL);
   apiRouter.use(requireAuth);
   apiRouter.use(meRouter);
   const businessStore = createSupabaseBusinessStore(
@@ -77,6 +79,7 @@ export function createApp() {
       reputation: createSupabaseReputationStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+      notify,
       checkReleased:
         escrowReader === null
           ? null
@@ -88,6 +91,11 @@ export function createApp() {
       milestones: createSupabaseMilestoneStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+      engagements: createSupabaseEngagementStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      businesses: businessStore,
+      notify,
     }),
   );
   apiRouter.use(
@@ -105,6 +113,7 @@ export function createApp() {
       reputation: createSupabaseReputationStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+      notify,
       checkDisputed:
         escrowReader === null
           ? null

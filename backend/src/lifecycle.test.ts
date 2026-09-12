@@ -44,6 +44,7 @@ function createStores() {
         world_session_id: business.worldSessionId,
         world_verified_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
+        email: business.email,
       };
       businesses.push(row);
       return row;
@@ -239,6 +240,7 @@ describe("lifecycle: register, propose, accept, submit, release", () => {
           },
         },
         reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
+        notify: { send: async () => {} },
       }),
     );
     await new Promise<void>((resolve) => {

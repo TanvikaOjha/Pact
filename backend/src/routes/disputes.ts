@@ -6,6 +6,14 @@ import type { DisputeVoteStore } from "../repos/disputes.js";
 import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
 import type { ReputationStore } from "../repos/reputation.js";
 import { log } from "../services/log.js";
+import {
+  disputeRaisedEmail,
+  disputeResolvedEmail,
+  disputeVoteEmail,
+  notifyAll,
+  recipientEmails,
+  type Notifier,
+} from "../services/notifications.js";
 import { recordCompletionIfNeeded } from "../services/reputation.js";
 import {
   isParty,
@@ -23,6 +31,7 @@ export interface DisputesRouteOptions {
   businesses: BusinessStore;
   votes: DisputeVoteStore;
   reputation: ReputationStore;
+  notify: Notifier;
   /** Null when escrow reads are unavailable; raise recording proceeds (dev/offchain path). */
   checkDisputed: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
@@ -72,6 +81,15 @@ async function handleRaise(
   await options.milestones.setDisputed(milestone.id, true);
   await options.engagements.updateStatus(engagement.id, "DISPUTED");
   log.info(`dispute raised: engagement ${engagement.id} milestone ${index}`);
+  const raiser =
+    req.identity === undefined
+      ? null
+      : await options.businesses.findByWallet(req.identity.walletAddress);
+  await notifyAll(
+    options.notify,
+    await recipientEmails(options.businesses, engagement, raiser?.id),
+    disputeRaisedEmail(engagement.ens_subname, milestone.name, index),
+  );
   res.json({ disputed: true });
 }
 
@@ -133,6 +151,11 @@ async function handleResolve(
   );
   if (match === null || match.wallet_address !== counterparty.wallet_address) {
     log.info(`dispute vote recorded (awaiting counterparty): engagement ${engagement.id} milestone ${index}`);
+    await notifyAll(
+      options.notify,
+      await recipientEmails(options.businesses, engagement, business.id),
+      disputeVoteEmail(engagement.ens_subname, milestone.name, index, providerAmount, clientRefund),
+    );
     res.json({ resolved: false });
     return;
   }
@@ -149,5 +172,10 @@ async function handleResolve(
     engagement.id,
   );
   log.info(`dispute resolved: engagement ${engagement.id} milestone ${index}`);
+  await notifyAll(
+    options.notify,
+    await recipientEmails(options.businesses, engagement),
+    disputeResolvedEmail(engagement.ens_subname, milestone.name, index),
+  );
   res.json({ resolved: true, releasedAt, engagementCompleted });
 }

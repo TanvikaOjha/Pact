@@ -259,6 +259,7 @@ describe("reputation", () => {
         votes: stores.voteStore,
         reputation: stores.reputationStore,
         checkReleased: null,
+        notify: { send: async () => {} },
       }),
     );
     app.use(
@@ -269,6 +270,7 @@ describe("reputation", () => {
         businesses: stores.businessStore,
         votes: stores.voteStore,
         reputation: stores.reputationStore,
+        notify: { send: async () => {} },
         checkDisputed: null,
       }),
     );

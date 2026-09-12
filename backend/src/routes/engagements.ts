@@ -11,6 +11,13 @@ import type {
 } from "../repos/engagements.js";
 import type { ReputationStore } from "../repos/reputation.js";
 import { log } from "../services/log.js";
+import {
+  completionSubmittedEmail,
+  milestoneReleasedEmail,
+  notifyAll,
+  recipientEmails,
+  type Notifier,
+} from "../services/notifications.js";
 import { recordCompletionIfNeeded } from "../services/reputation.js";
 import { releaseAfter } from "../services/scheduler.js";
 
@@ -38,6 +45,7 @@ export interface EngagementsRouteOptions {
   businesses: BusinessStore;
   votes: DisputeVoteStore;
   reputation: ReputationStore;
+  notify: Notifier;
   /** Null when escrow reads are unavailable; recording proceeds (dev/offchain path). */
   checkReleased: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
@@ -186,6 +194,11 @@ async function handleSubmit(
   const submittedAt = new Date().toISOString();
   await options.milestones.markSubmitted(milestone.id, submittedAt);
   log.info(`completion submitted: engagement ${engagement.id} milestone ${index}`);
+  await notifyAll(
+    options.notify,
+    await recipientEmails(options.businesses, engagement, business.id),
+    completionSubmittedEmail(engagement.ens_subname, milestone.name, index, milestone.amount, releaseAfter(submittedAt)),
+  );
   res.json({ submittedAt, releaseAfter: releaseAfter(submittedAt) });
 }
 
@@ -269,5 +282,10 @@ async function handleRelease(
     engagement.id,
   );
   log.info(`milestone released: engagement ${engagement.id} milestone ${index}`);
+  await notifyAll(
+    options.notify,
+    await recipientEmails(options.businesses, engagement),
+    milestoneReleasedEmail(engagement.ens_subname, milestone.name, index, milestone.amount),
+  );
   res.json({ releasedAt, engagementCompleted });
 }

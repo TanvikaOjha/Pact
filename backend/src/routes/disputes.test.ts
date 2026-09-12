@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import type { BusinessRow, BusinessStore } from "../repos/businesses.js";
 import type { DisputeVoteRow, DisputeVoteStore, NewDisputeVote } from "../repos/disputes.js";
-import type {
+import type { EmailMessage } from "../services/notifications.js";import type {
   EngagementRow,
   EngagementStatus,
   EngagementStore,
@@ -30,6 +30,19 @@ function businessRow(id: string, wallet: string): BusinessRow {
     world_session_id: `session_dev_${id}`,
     world_verified_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
+    email: `${id}@example.com`,
+  };
+}
+
+function createCapturingNotifier() {
+  const sent: EmailMessage[] = [];
+  return {
+    sent,
+    notify: {
+      send: async (message: EmailMessage): Promise<void> => {
+        sent.push(message);
+      },
+    },
   };
 }
 
@@ -211,6 +224,7 @@ const MILESTONE = {
 describe("disputes", () => {
   let server: Server | null = null;
   let port = 0;
+  const notifier = createCapturingNotifier();
 
   beforeAll(async () => {
     const stores = createStores();
@@ -232,6 +246,7 @@ describe("disputes", () => {
         checkReleased: null,
         votes: stores.voteStore,
         reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
+        notify: notifier.notify,
       }),
     );
     app.use(
@@ -242,6 +257,7 @@ describe("disputes", () => {
         businesses: stores.businessStore,
         votes: stores.voteStore,
         reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
+        notify: notifier.notify,
         checkDisputed: null,
       }),
     );
@@ -299,6 +315,9 @@ describe("disputes", () => {
     );
     expect(raised.status).toBe(200);
     expect(raised.body.disputed).toBe(true);
+    const raisedMail = notifier.sent.at(-1);
+    expect(raisedMail?.to).toBe("biz-a@example.com");
+    expect(raisedMail?.subject.includes("Dispute raised")).toBe(true);
 
     const repeat = await api(
       port,
@@ -349,6 +368,9 @@ describe("disputes", () => {
     );
     expect(firstVote.status).toBe(200);
     expect(firstVote.body.resolved).toBe(false);
+    const cosignMail = notifier.sent.at(-1);
+    expect(cosignMail?.to).toBe("biz-b@example.com");
+    expect(cosignMail?.subject.includes("Co-sign needed")).toBe(true);
 
     const otherSplit = await api(
       port,
@@ -368,6 +390,13 @@ describe("disputes", () => {
     expect(match.status).toBe(200);
     expect(match.body.resolved).toBe(true);
     expect(match.body.engagementCompleted).toBe(true);
+    const resolvedMails = notifier.sent.filter((message) =>
+      message.subject.includes("Dispute resolved"),
+    );
+    expect(resolvedMails.map((message) => message.to).sort()).toEqual([
+      "biz-a@example.com",
+      "biz-b@example.com",
+    ]);
 
     const settled = await api(
       port,

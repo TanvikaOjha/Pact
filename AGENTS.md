@@ -134,6 +134,7 @@ backend/
     ens/pact-terms.ts    Terms-V1 canonicalizer — MUST stay byte-identical to
                          root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)
+    services/notifications.ts Resend notifier (log-only without key) + templates
     services/world.ts    portal verify via fetch to v4/verify/{rp_id} + zod parsing
     services/scheduler.ts ACCEPTANCE_WINDOW_HOURS + releaseAfter + findDueReleases (pure)
     types/express.d.ts   Request augmentation
@@ -141,6 +142,7 @@ backend/
                          only after root scripts stabilize — never fork them)
   supabase/migrations/0001_pact_core.sql + 0002_business_session_unique.sql
   + 0003_dispute_votes.sql + 0004_proposal_accepted.sql
+  + 0005_business_email.sql
   src/lifecycle.test.ts  cross-router composition proof (register→propose→
   accept→submit→release); update it when handoffs change
   oxlint.config.ts

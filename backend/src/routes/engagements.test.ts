@@ -13,6 +13,7 @@ import type {
   NewEngagement,
   NewMilestone,
 } from "../repos/engagements.js";
+import type { EmailMessage } from "../services/notifications.js";
 import { createEngagementsRouter } from "./engagements.js";
 
 const WALLET_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -28,6 +29,19 @@ function businessRow(id: string, wallet: string, subname: string): BusinessRow {
     world_session_id: `session_dev_${id}`,
     world_verified_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
+    email: `${id}@example.com`,
+  };
+}
+
+function createCapturingNotifier() {
+  const sent: EmailMessage[] = [];
+  return {
+    sent,
+    notify: {
+      send: async (message: EmailMessage): Promise<void> => {
+        sent.push(message);
+      },
+    },
   };
 }
 
@@ -188,6 +202,7 @@ function draft(overrides: DraftOverrides = {}): string {
 describe("engagements", () => {
   let server: Server | null = null;
   let port = 0;
+  const notifier = createCapturingNotifier();
 
   beforeAll(async () => {
     const app = express();
@@ -215,6 +230,7 @@ describe("engagements", () => {
           },
         },
         reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
+        notify: notifier.notify,
       }),
     );
     await new Promise<void>((resolve) => {
@@ -287,6 +303,9 @@ describe("engagements", () => {
     const submittedAt = Date.parse(first.body.submittedAt ?? "");
     const releaseAfter = Date.parse(first.body.releaseAfter ?? "");
     expect(releaseAfter - submittedAt).toBe(48 * 3600 * 1000);
+    const submittedMail = notifier.sent.at(-1);
+    expect(submittedMail?.to).toBe("biz-b@example.com");
+    expect(submittedMail?.subject.includes("Completion submitted")).toBe(true);
 
     const repeat = await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_B);
     expect(repeat.status).toBe(409);
@@ -321,6 +340,15 @@ describe("engagements", () => {
     const last = await api(port, "POST", `/api/engagements/${id}/milestones/1/release`, WALLET_A);
     expect(last.status).toBe(200);
     expect(last.body.engagementCompleted).toBe(true);
+    const releaseMails = notifier.sent.filter((message) =>
+      message.subject.includes("Milestone released"),
+    );
+    expect(releaseMails.map((message) => message.to).sort()).toEqual([
+      "biz-a@example.com",
+      "biz-a@example.com",
+      "biz-b@example.com",
+      "biz-b@example.com",
+    ]);
 
     const outsider = await api(port, "POST", `/api/engagements/${id}/milestones/1/release`, OUTSIDER);
     expect(outsider.status).toBe(403);

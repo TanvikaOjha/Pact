@@ -141,6 +141,23 @@ export function disputeResolvedEmail(ensSubname: string, name: string | null, in
   };
 }
 
+export function disputeVoteEmail(
+  ensSubname: string,
+  name: string | null,
+  index: number,
+  providerAmount: number,
+  clientRefund: number,
+): EmailContent {
+  return {
+    subject: `Co-sign needed: ${ensSubname}`,
+    text: [
+      `Your counterparty proposed resolving ${milestoneLabel(name, index)} on`,
+      `engagement ${ensSubname} as ${providerAmount} to provider / ${clientRefund} refund.`,
+      `Submit the identical split to release the funds.`,
+    ].join("\n"),
+  };
+}
+
 export function releaseDueEmail(
   ensSubname: string,
   name: string | null,

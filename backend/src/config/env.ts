@@ -26,6 +26,7 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url("SUPABASE_URL must be a URL"),
   SUPABASE_SERVICE_KEY: z.string().min(1, "SUPABASE_SERVICE_KEY required"),
   RESEND_API_KEY: z.string().optional(),
+  NOTIFY_FROM_EMAIL: z.string().min(1).default("Pact <onboarding@resend.dev>"),
   USDC_SEPOLIA_ADDRESS: z.string().optional(),
   PACT_REGISTRY_ADDRESS: z.string().optional(),
   PACT_ESCROW_ADDRESS: z.string().optional(),
