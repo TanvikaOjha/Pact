@@ -4,6 +4,11 @@ pragma solidity ^0.8.24;
 import {IERC20} from "./interfaces/IERC20.sol";
 import {PactRegistry} from "./PactRegistry.sol";
 
+/// @notice Minimal score-tier read. PactScore lands later; escrow only needs the tier.
+interface IPactScore {
+    function getTier(string calldata subname) external view returns (uint8);
+}
+
 /// @title PactEscrow
 /// @notice Holds USDC per engagement and releases it on milestone acceptance.
 /// Core design goal (the "FilePizza mechanic"): releaseMilestone() and autoRelease()
@@ -49,6 +54,26 @@ contract PactEscrow {
         bool late;               // M4: true if submitted past deadline + grace
     }
 
+    /// @notice M1 bilateral fidelity bond state per engagement.
+    struct Bond {
+        uint256 amount;
+        address bonder;
+        bool posted;
+        bool frozen;
+        bool settled;
+        uint256 burned;
+    }
+
+    /// @notice M3 optimistic dispute state per milestone.
+    struct DisputeState {
+        bool active;
+        uint256 providerAmount;
+        uint256 clientRefund;
+        address proposer;
+        uint256 challengeDeadline;
+        bool challenged;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Storage
     // ─────────────────────────────────────────────────────────────────────────
@@ -66,6 +91,24 @@ contract PactEscrow {
     mapping(bytes32 => mapping(uint256 => Milestone)) public milestones;
     mapping(bytes32 => mapping(uint256 => MilestoneTerms)) public milestoneTerms;
     mapping(bytes32 => mapping(uint256 => bool)) public worldAttested;
+    mapping(bytes32 => Bond) public bonds;
+    mapping(bytes32 => mapping(uint256 => DisputeState)) public disputeStates;
+
+    /// @notice M1 bond size by score tier: 10% / 7% / 5% / 2% (bps).
+    /// Array constants are not supported by Solidity, so this pure getter
+    /// exposes the same curve: index = tier, value = bps.
+    function BOND_BPS_BY_TIER(uint256 tier) public pure returns (uint16) {
+        if (tier == 1) return 700;
+        if (tier == 2) return 500;
+        if (tier >= 3) return 200;
+        return 1000;
+    }
+
+    /// @notice M2 PactScore contract (tier source). Zero = no score yet, tier 0.
+    address public scoreContract;
+
+    /// @dev Burn sink for slashed bonds.
+    address internal constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     /// @dev dispute co-signature bookkeeping: engagementId => milestoneIndex => party => proposal hash
     mapping(bytes32 => mapping(uint256 => mapping(address => bytes32))) private _disputeVote;
@@ -83,6 +126,17 @@ contract PactEscrow {
     event WorldVerified(bytes32 indexed engagementId, uint256 milestoneIndex);
     event HighValueThresholdUpdated(uint256 newThreshold);
     event WorldVerifierUpdated(address newVerifier);
+    event BondPosted(bytes32 indexed engagementId, address indexed bonder, uint256 amount);
+    event BondReturned(bytes32 indexed engagementId, address indexed provider, uint256 amount);
+    event BondSlashed(bytes32 indexed engagementId, uint256 amount);
+    event BondFrozen(bytes32 indexed engagementId);
+    event ResolutionProposed(
+        bytes32 indexed engagementId, uint256 milestoneIndex, uint256 providerAmount, uint256 clientRefund, address proposer
+    );
+    event ResolutionChallenged(bytes32 indexed engagementId, uint256 milestoneIndex, address challenger);
+    event ResolutionExecuted(
+        bytes32 indexed engagementId, uint256 milestoneIndex, uint256 providerAmount, uint256 clientRefund, bool challenged
+    );
 
     /// @notice The reputation record. Anyone can filter this event by subname to
     /// reproduce a business's track record with zero trust in Pact's backend.
@@ -124,6 +178,10 @@ contract PactEscrow {
     error EvidenceRequired();
     error TransferFailed();
     error ZeroAddress();
+    error BondNotPosted();
+    error BondAlreadyPosted();
+    error NotProposer();
+    error CannotChallengeOwnProposal();
 
     modifier onlyAdmin() {
         if (msg.sender != admin) revert OnlyAdmin();
@@ -155,6 +213,17 @@ contract PactEscrow {
     function transferAdmin(address newAdmin) external onlyAdmin {
         if (newAdmin == address(0)) revert ZeroAddress();
         admin = newAdmin;
+    }
+
+    /// @notice Wire the PactScore contract (M2 lands later). Zero disables tier reads (tier 0).
+    function setScoreContract(address newScoreContract) external onlyAdmin {
+        scoreContract = newScoreContract;
+    }
+
+    /// @notice Score tier of a provider wallet. 0 when no score contract is wired.
+    function _providerTier(address wallet) internal view returns (uint8) {
+        if (scoreContract == address(0)) return 0;
+        return IPactScore(scoreContract).getTier(registry.getBusiness(wallet).ensSubname);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -193,6 +262,10 @@ contract PactEscrow {
 
         address provider = msg.sender == e.partyA ? e.partyB : e.partyA;
 
+        // M1: provider must stake the fidelity bond before the client funds.
+        Bond storage existingBond = bonds[engagementId];
+        if (!existingBond.posted || existingBond.bonder != provider) revert BondNotPosted();
+
         escrows[engagementId] = EscrowInfo({
             client: msg.sender,
             provider: provider,
@@ -222,6 +295,67 @@ contract PactEscrow {
         if (!ok) revert TransferFailed();
 
         emit EngagementFunded(engagementId, msg.sender, provider, e.totalAmount, milestoneAmounts.length);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // M1 bilateral fidelity bonds
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @notice Provider stakes a fidelity bond (score-scaled, 10% at tier 0).
+    /// Caller must be a registry party of the engagement. Required before fundEngagement.
+    function postBond(bytes32 engagementId) external {
+        PactRegistry.Engagement memory e = registry.getEngagement(engagementId);
+        if (msg.sender != e.partyA && msg.sender != e.partyB) revert NotAParty();
+        Bond storage b = bonds[engagementId];
+        if (b.posted) revert BondAlreadyPosted();
+
+        uint8 tier = _providerTier(msg.sender);
+        uint256 bps = BOND_BPS_BY_TIER(tier);
+        uint256 amount = (e.totalAmount * bps) / 10_000;
+
+        bool ok = usdc.transferFrom(msg.sender, address(this), amount);
+        if (!ok) revert TransferFailed();
+
+        b.amount = amount;
+        b.bonder = msg.sender;
+        b.posted = true;
+        b.frozen = false;
+        b.settled = false;
+        b.burned = 0;
+
+        emit BondPosted(engagementId, msg.sender, amount);
+    }
+
+    /// @notice Settles the bond slice for one milestone release/resolution:
+    /// burns amount/milestoneCount if the milestone was late, and returns the
+    /// remainder to the provider once every milestone has released.
+    function _settleBond(bytes32 engagementId, EscrowInfo storage info, uint256 milestoneIndex) internal {
+        Bond storage b = bonds[engagementId];
+        if (!b.posted || b.settled) return;
+        b.frozen = false;
+
+        Milestone storage m = milestones[engagementId][milestoneIndex];
+        if (m.late && info.milestoneCount > 0) {
+            uint256 share = b.amount / info.milestoneCount;
+            if (share > 0) {
+                b.burned += share;
+                bool ok = usdc.transfer(BURN_ADDRESS, share);
+                if (!ok) revert TransferFailed();
+                emit BondSlashed(engagementId, share);
+            }
+        }
+
+        for (uint256 i = 0; i < info.milestoneCount; i++) {
+            if (!milestones[engagementId][i].released) return;
+        }
+
+        uint256 returned = b.amount - b.burned;
+        b.settled = true;
+        if (returned > 0) {
+            bool ok = usdc.transfer(info.provider, returned);
+            if (!ok) revert TransferFailed();
+        }
+        emit BondReturned(engagementId, info.provider, returned);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -294,6 +428,7 @@ contract PactEscrow {
         if (!ok) revert TransferFailed();
 
         emit MilestoneReleased(engagementId, milestoneIndex, m.amount);
+        _settleBond(engagementId, info, milestoneIndex);
         _finalizeIfComplete(engagementId, info);
     }
 
@@ -335,6 +470,7 @@ contract PactEscrow {
         }
 
         emit MilestoneReleased(engagementId, 0, m.amount);
+        _settleBond(engagementId, info, 0);
         _finalizeIfComplete(engagementId, info);
     }
 
@@ -372,6 +508,13 @@ contract PactEscrow {
         info.everDisputed = true;
 
         emit MilestoneDisputed(engagementId, milestoneIndex);
+
+        // M1: disputed milestones freeze the bond until resolution.
+        Bond storage db = bonds[engagementId];
+        if (db.posted && !db.settled) {
+            db.frozen = true;
+            emit BondFrozen(engagementId);
+        }
     }
 
     /// @notice Key-quorum resolution: both client and provider must independently
@@ -412,8 +555,111 @@ contract PactEscrow {
             }
 
             emit DisputeResolved(engagementId, milestoneIndex, providerAmount, clientRefund);
+            _settleBond(engagementId, info, milestoneIndex);
             _finalizeIfComplete(engagementId, info);
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // M3 optimistic disputes (co-sign path above is the mutual fast path)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @notice Either party proposes a split for a disputed milestone.
+    /// First proposal opens a fixed challenge window; only the proposer may
+    /// update afterwards, and re-proposals never extend the original deadline.
+    function proposeResolution(
+        bytes32 engagementId,
+        uint256 milestoneIndex,
+        uint256 providerAmount,
+        uint256 clientRefund
+    ) external {
+        EscrowInfo storage info = escrows[engagementId];
+        if (!info.funded) revert NotFunded();
+        if (msg.sender != info.client && msg.sender != info.provider) revert NotAParty();
+
+        Milestone storage m = milestones[engagementId][milestoneIndex];
+        if (!m.submitted) revert MilestoneNotSubmitted();
+        if (m.released) revert MilestoneAlreadyReleased();
+        if (!m.disputed) revert MilestoneNotDisputed();
+        if (providerAmount + clientRefund != m.amount) revert AmountsMismatch();
+
+        DisputeState storage s = disputeStates[engagementId][milestoneIndex];
+        if (s.challengeDeadline == 0) {
+            s.active = true;
+            s.providerAmount = providerAmount;
+            s.clientRefund = clientRefund;
+            s.proposer = msg.sender;
+            s.challengeDeadline =
+                block.timestamp + milestoneTerms[engagementId][milestoneIndex].challengeWindowSeconds;
+            s.challenged = false;
+        } else {
+            if (msg.sender != s.proposer) revert NotProposer();
+            s.providerAmount = providerAmount;
+            s.clientRefund = clientRefund;
+            // keep the ORIGINAL deadline and the challenged flag
+        }
+
+        emit ResolutionProposed(engagementId, milestoneIndex, providerAmount, clientRefund, msg.sender);
+    }
+
+    /// @notice Counterparty challenges a proposed split. At window close,
+    /// executeResolution then pays the pre-agreed default split instead.
+    function challengeResolution(bytes32 engagementId, uint256 milestoneIndex) external {
+        EscrowInfo storage info = escrows[engagementId];
+        if (!info.funded) revert NotFunded();
+        if (msg.sender != info.client && msg.sender != info.provider) revert NotAParty();
+
+        Milestone storage m = milestones[engagementId][milestoneIndex];
+        if (m.released) revert MilestoneAlreadyReleased();
+
+        DisputeState storage s = disputeStates[engagementId][milestoneIndex];
+        if (!s.active || s.challengeDeadline == 0) revert MilestoneNotDisputed();
+        if (msg.sender == s.proposer) revert CannotChallengeOwnProposal();
+
+        s.challenged = true;
+        emit ResolutionChallenged(engagementId, milestoneIndex, msg.sender);
+    }
+
+    /// @notice Anyone executes a matured proposal: the proposed split when
+    /// unchallenged, else the pre-agreed default split from milestone terms.
+    function executeResolution(bytes32 engagementId, uint256 milestoneIndex) external {
+        EscrowInfo storage info = escrows[engagementId];
+        if (!info.funded) revert NotFunded();
+
+        Milestone storage m = milestones[engagementId][milestoneIndex];
+        if (m.released) revert MilestoneAlreadyReleased();
+
+        DisputeState storage s = disputeStates[engagementId][milestoneIndex];
+        if (!s.active || s.challengeDeadline == 0) revert MilestoneNotDisputed();
+        if (block.timestamp < s.challengeDeadline) revert WindowNotClosed();
+
+        uint256 providerAmount;
+        uint256 clientRefund;
+        bool wasChallenged = s.challenged;
+        if (wasChallenged) {
+            MilestoneTerms storage t = milestoneTerms[engagementId][milestoneIndex];
+            providerAmount = (m.amount * t.defaultProviderBps) / 10_000;
+            clientRefund = m.amount - providerAmount;
+        } else {
+            providerAmount = s.providerAmount;
+            clientRefund = s.clientRefund;
+        }
+
+        m.released = true;
+        m.disputed = false;
+
+        if (providerAmount > 0) {
+            bool okP = usdc.transfer(info.provider, providerAmount);
+            if (!okP) revert TransferFailed();
+        }
+        if (clientRefund > 0) {
+            bool okC = usdc.transfer(info.client, clientRefund);
+            if (!okC) revert TransferFailed();
+        }
+
+        emit ResolutionExecuted(engagementId, milestoneIndex, providerAmount, clientRefund, wasChallenged);
+        _settleBond(engagementId, info, milestoneIndex);
+        _finalizeIfComplete(engagementId, info);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -474,5 +720,9 @@ contract PactEscrow {
 
     function getEscrowInfo(bytes32 engagementId) external view returns (EscrowInfo memory) {
         return escrows[engagementId];
+    }
+
+    function getBond(bytes32 engagementId) external view returns (Bond memory) {
+        return bonds[engagementId];
     }
 }
