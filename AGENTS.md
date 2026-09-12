@@ -110,7 +110,10 @@ backend/
     routes/businesses.ts POST /api/businesses/register (World→dedupe→mirror row;
     caller sends registerBusiness tx themselves; ENS minting follows)
     routes/businesses.test.ts HTTP tests (memory store)
+    routes/proposals.ts  POST /api/proposals (authed, canonical hash) +
+    GET /api/proposals/:token (public link view, 410 past expiry)
     repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
+    repos/proposals.ts   ProposalStore (ephemeral drafts, 14d TTL)
     ens/pact-terms.ts    Terms-V1 canonicalizer — MUST stay byte-identical to
                          root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)

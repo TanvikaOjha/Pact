@@ -5,9 +5,11 @@ import { getRegistryReader } from "./chain/registry.js";
 import { errorHandler, requestId } from "./middleware/http.js";
 import { createRequireAuth, createPrivyVerifier, getPrivyClient } from "./middleware/privyAuth.js";
 import { createSupabaseBusinessStore } from "./repos/businesses.js";
+import { createSupabaseProposalStore } from "./repos/proposals.js";
 import { healthRouter } from "./routes/health.js";
 import { meRouter } from "./routes/me.js";
 import { createBusinessesRouter } from "./routes/businesses.js";
+import { createProposalsRouter } from "./routes/proposals.js";
 import { createWorldRouter } from "./routes/world.js";
 
 export function createApp() {
@@ -22,17 +24,26 @@ export function createApp() {
     env.PRIVY_APP_SECRET,
     env.PRIVY_JWT_VERIFICATION_KEY,
   );
-  apiRouter.use(
-    createRequireAuth({
-      allowDevAuth: env.ALLOW_DEV_AUTH,
-      verifier: privyClient === null ? null : createPrivyVerifier(privyClient),
-    }),
-  );
+  const requireAuth = createRequireAuth({
+    allowDevAuth: env.ALLOW_DEV_AUTH,
+    verifier: privyClient === null ? null : createPrivyVerifier(privyClient),
+  });
+  apiRouter.use(requireAuth);
   apiRouter.use(meRouter);
   const businessStore = createSupabaseBusinessStore(
     getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
   );
   const registryReader = getRegistryReader(env.SEPOLIA_RPC_URL, env.PACT_REGISTRY_ADDRESS);
+  app.use(
+    "/api",
+    createProposalsRouter({
+      store: createSupabaseProposalStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      businesses: businessStore,
+      requireAuth,
+    }),
+  );
   apiRouter.use(
     createBusinessesRouter({
       store: businessStore,

@@ -18,6 +18,7 @@ export interface NewBusiness {
 }
 
 export interface BusinessStore {
+  findById(id: string): Promise<BusinessRow | null>;
   findByWallet(walletAddress: string): Promise<BusinessRow | null>;
   findBySubname(ensSubname: string): Promise<BusinessRow | null>;
   findByWorldSession(worldSessionId: string): Promise<BusinessRow | null>;
@@ -33,37 +34,21 @@ function firstRow(rows: BusinessRow[] | null): BusinessRow | null {
 
 /** Supabase-backed mirror store. On-chain remains authoritative; rows here are UX cache. */
 export function createSupabaseBusinessStore(client: SupabaseClient): BusinessStore {
+  async function findOne(column: string, value: string): Promise<BusinessRow | null> {
+    const result = await client
+      .from("businesses")
+      .select("*")
+      .eq(column, value)
+      .limit(1)
+      .returns<BusinessRow[]>();
+    if (result.error) throw new Error(`business lookup failed: ${result.error.message}`);
+    return firstRow(result.data);
+  }
   return {
-    async findByWallet(walletAddress: string): Promise<BusinessRow | null> {
-      const result = await client
-        .from("businesses")
-        .select("*")
-        .eq("wallet_address", walletAddress)
-        .limit(1)
-        .returns<BusinessRow[]>();
-      if (result.error) throw new Error(`business lookup failed: ${result.error.message}`);
-      return firstRow(result.data);
-    },
-    async findBySubname(ensSubname: string): Promise<BusinessRow | null> {
-      const result = await client
-        .from("businesses")
-        .select("*")
-        .eq("ens_subname", ensSubname)
-        .limit(1)
-        .returns<BusinessRow[]>();
-      if (result.error) throw new Error(`business lookup failed: ${result.error.message}`);
-      return firstRow(result.data);
-    },
-    async findByWorldSession(worldSessionId: string): Promise<BusinessRow | null> {
-      const result = await client
-        .from("businesses")
-        .select("*")
-        .eq("world_session_id", worldSessionId)
-        .limit(1)
-        .returns<BusinessRow[]>();
-      if (result.error) throw new Error(`business lookup failed: ${result.error.message}`);
-      return firstRow(result.data);
-    },
+    findById: (id: string) => findOne("id", id),
+    findByWallet: (walletAddress: string) => findOne("wallet_address", walletAddress),
+    findBySubname: (ensSubname: string) => findOne("ens_subname", ensSubname),
+    findByWorldSession: (worldSessionId: string) => findOne("world_session_id", worldSessionId),
     async insert(business: NewBusiness): Promise<BusinessRow> {
       const result = await client
         .from("businesses")
