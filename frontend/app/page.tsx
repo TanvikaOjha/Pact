@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { useStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import Seal from "@/components/Seal";
 import Marquee from "@/components/Marquee";
 import RevealOnScroll from "@/components/RevealOnScroll";
 import StatCounter from "@/components/StatCounter";
 import TemplateIcon from "@/components/TemplateIcon";
+import { DecryptReveal } from "@/components/canvas/DecryptReveal";
+import { GlyphRain } from "@/components/canvas/GlyphRain";
 
 const failures = [
   {
@@ -37,14 +39,6 @@ const feed = [
   { a: "quiet-form.pact-hack.eth", b: "atlas-co.pact-hack.eth", tpl: "Fixed", value: "$3,200", flag: "on time" },
 ];
 
-const heroCards = [
-  { k: "pact:type", v: "milestone", rot: -4, top: "6%", left: "8%" },
-  { k: "pact:amount", v: "$7,500 USDC", rot: 3, top: "34%", left: "46%" },
-  { k: "pact:status", v: "verified ✓", rot: -2, top: "62%", left: "16%" },
-];
-
-const headline = ["Both parties commit.", "Both parties can verify.", "Neither can ghost."];
-
 const fixes = [
   { title: "Verify before you sign", body: "Resolve the proposed terms live on ENS. What you see is what's going on-chain — no PDF, no 'our records show.'", icon: "fixed" as const },
   { title: "Backend-optional release", body: "releaseMilestone() is callable directly by the accepting party's wallet. If Pact's server disappears, your payment still releases.", icon: "milestone" as const },
@@ -53,14 +47,32 @@ const fixes = [
 ];
 
 export default function Landing() {
-  const { currentBusiness } = useStore();
-  const ctaHref = currentBusiness ? "/templates" : "/identity";
+  const { walletAddress } = useAuth();
+  const ctaHref = walletAddress ? "/templates" : "/identity";
 
   return (
     <div>
       {/* HERO */}
-      <section className="relative pt-16 pb-20 binding pl-6 -ml-6 overflow-hidden">
-        <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-10 items-center">
+      <section className="relative py-24 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+          <GlyphRain
+            className="h-full w-full"
+            color={[0.18, 0.83, 0.75]}
+            headColor={[0.37, 0.92, 0.83]}
+            density={0.06}
+            speed={0.12}
+            trail={0.8}
+            glow={1}
+            dim={0}
+            light={0.6}
+            lightRadius={200}
+            stir={0}
+            layers={1}
+          >
+            <div className="h-full w-full" />
+          </GlyphRain>
+        </div>
+        <div className="relative grid lg:grid-cols-2 gap-10 items-center">
           <div>
             <motion.div
               className="flex items-center gap-2 mb-6"
@@ -69,26 +81,44 @@ export default function Landing() {
               transition={{ duration: 0.5 }}
             >
               <Seal size={30} />
-              <p className="mono-tag text-ink-faint">Pact</p>
+              <p className="mono-tag text-ink-mute">Pact</p>
             </motion.div>
 
-            <h1 className="font-serif text-[2.5rem] sm:text-[3.3rem] leading-[1.08] max-w-xl">
-              {headline.map((line, i) => (
-                <span key={line} className="block ">
-                  <motion.span
-                    className="block"
-                    initial={{ y: "110%" }}
-                    animate={{ y: "0%" }}
-                    transition={{ duration: 0.7, delay: 0.15 + i * 0.12, ease: [0.2, 0.8, 0.2, 1] }}
-                  >
-                    {line}
-                  </motion.span>
-                </span>
-              ))}
+            <h1 className="text-[64px] leading-[1.1] tracking-[-1.6px] font-normal max-w-xl">
+              <span className="block">
+                <motion.span
+                  className="block"
+                  initial={{ y: "110%" }}
+                  animate={{ y: "0%" }}
+                  transition={{ duration: 0.7, delay: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  Both parties commit.
+                </motion.span>
+              </span>
+              <span className="block overflow-hidden">
+                <motion.span
+                  className="block"
+                  initial={{ y: "110%" }}
+                  animate={{ y: "0%" }}
+                  transition={{ duration: 0.7, delay: 0.27, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  Both parties can verify.
+                </motion.span>
+              </span>
+              <span className="block overflow-hidden">
+                <motion.span
+                  className="block"
+                  initial={{ y: "110%" }}
+                  animate={{ y: "0%" }}
+                  transition={{ duration: 0.7, delay: 0.39, ease: [0.2, 0.8, 0.2, 1] }}
+                >
+                  Neither can ghost.
+                </motion.span>
+              </span>
             </h1>
 
             <motion.p
-              className="mt-5 text-lg text-ink-soft max-w-lg"
+              className="mt-5 text-lg text-ink-body max-w-lg"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.6, delay: 0.65 }}
@@ -106,43 +136,66 @@ export default function Landing() {
               <Link href={ctaHref} className="btn-primary">
                 Start an engagement
               </Link>
-              <span className="text-sm text-ink-faint hidden sm:inline">
-                No wallet connect. No chain selector. Email only.
+              <span className="text-sm text-ink-mute hidden sm:inline">
+                Email only. No seed phrase. No gas prompt.
               </span>
             </motion.div>
           </div>
 
-          {/* Floating ENS record cards — decorative, hidden on small screens */}
-          <div className="relative h-72 hidden lg:block">
-            {heroCards.map((c, i) => (
-              <motion.div
-                key={c.k}
-                className="absolute border border-rule bg-paper-bright px-4 py-3 shadow-none"
-                style={{ top: c.top, left: c.left, rotate: c.rot }}
-                initial={{ opacity: 0, y: 24 }}
-                animate={{
-                  opacity: 1,
-                  y: [0, -8, 0],
-                }}
-                transition={{
-                  opacity: { duration: 0.6, delay: 0.4 + i * 0.15 },
-                  y: { duration: 4 + i, repeat: Infinity, ease: "easeInOut", delay: i * 0.3 },
-                }}
-              >
-                <p className="mono-tag text-ink-faint">{c.k}</p>
-                <p className="font-mono text-sm">{c.v}</p>
-              </motion.div>
-            ))}
+          {/* Terminal mockup split — the brand's one decorative system */}
+          <div className="grid gap-4">
+            <DecryptReveal
+              color="#2DD4BF"
+              background="#2b2622"
+              colored={0}
+              radius={280}
+              aberration={0}
+              edgeTint={0.6}
+              scramble={0.06}
+              scrambleSpeed={4}
+            >
+            <motion.div
+              className="terminal"
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+            >
+              <div className="px-4 py-2.5 border-b border-line flex items-center gap-2">
+                <span className="mono-tag text-ink-mute">propose — eng-a3f9.pact.eth</span>
+              </div>
+              <div className="px-4 py-3 space-y-1.5 font-mono text-[13px] leading-[18px]">
+                <p><span className="text-ink-mute">pact:type&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span className="text-ink">milestone</span></p>
+                <p><span className="text-ink-mute">pact:scope&nbsp;&nbsp;&nbsp;&nbsp;</span><span className="text-ink">Website redesign</span></p>
+                <p><span className="text-ink-mute">pact:amount&nbsp;&nbsp;&nbsp;</span><span className="text-accent">$7,500 USDC</span></p>
+                <p><span className="text-ink-mute">pact:status&nbsp;&nbsp;&nbsp;</span><span className="text-ink">active</span></p>
+              </div>
+            </motion.div>
+            </DecryptReveal>
+            <motion.div
+              className="terminal"
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.55 }}
+            >
+              <div className="px-4 py-2.5 border-b border-line flex items-center gap-2">
+                <span className="mono-tag text-ink-mute">release — direct on-chain</span>
+              </div>
+              <div className="px-4 py-3 space-y-1.5 font-mono text-[13px] leading-[18px]">
+                <p><span className="text-ink-mute">$&nbsp;</span><span className="text-ink">releaseMilestone(0xa3f9…, 1)</span></p>
+                <p><span className="text-accent">✓ MilestoneReleased · $3,000 → studio</span></p>
+                <p><span className="text-ink-mute"># no backend in this transaction</span></p>
+              </div>
+            </motion.div>
           </div>
         </div>
       </section>
 
-      {/* TICKER */}
+      {/* RECORD TICKER */}
       <RevealOnScroll>
         <section>
-          <p className="text-sm text-ink-faint mb-3">The record, so far</p>
+          <p className="text-sm text-ink-mute mb-3">The record, so far</p>
           <Marquee rows={feed} />
-          <p className="text-xs text-ink-faint mt-3">
+          <p className="text-xs text-ink-mute mt-3">
             Illustrative — every real event here is reproducible from the block
             explorer, not from Pact&rsquo;s database.
           </p>
@@ -150,31 +203,31 @@ export default function Landing() {
       </RevealOnScroll>
 
       {/* FAILURES */}
-      <section className="py-14 border-t border-rule mt-14">
+      <section className="py-24">
         <RevealOnScroll>
-          <h2 className="font-serif text-2xl mb-8 max-w-lg">
+          <h2 className="text-5xl font-normal tracking-[-1.2px] leading-[1.1] mb-8 max-w-2xl">
             Two businesses want to work together. Right now, that&rsquo;s a
             Word doc and a hope.
           </h2>
         </RevealOnScroll>
-        <div className="grid sm:grid-cols-3 gap-px bg-rule">
+        <div className="grid sm:grid-cols-3 gap-px bg-line border border-line">
           {failures.map((f, i) => (
-            <RevealOnScroll key={f.label} delay={i * 0.1} className="bg-paper-bright p-6">
-              <p className="font-serif text-3xl mb-2">
+            <RevealOnScroll key={f.label} delay={i * 0.1} className="bg-canvas-soft p-6">
+              <p className="text-3xl mb-2">
                 <StatCounter value={f.value} suffix={f.suffix} />
               </p>
-              <p className="text-sm mb-3">{f.label}</p>
-              <p className="text-sm text-ink-soft">{f.body}</p>
+              <p className="text-sm mb-3 text-ink">{f.label}</p>
+              <p className="text-sm text-ink-body">{f.body}</p>
             </RevealOnScroll>
           ))}
         </div>
       </section>
 
       {/* FIXES */}
-      <section className="py-14 border-t border-rule">
+      <section className="py-24 border-t border-line">
         <RevealOnScroll>
-          <h2 className="font-serif text-2xl mb-3">How Pact fixes it</h2>
-          <p className="text-ink-soft max-w-xl mb-8">
+          <h2 className="text-5xl font-normal tracking-[-1.2px] leading-[1.1] mb-3">How Pact fixes it</h2>
+          <p className="text-ink-body max-w-xl mb-8">
             Terms live on ENS — readable by anyone, disputable by nobody. Both
             parties escrow USDC before work begins. Completion emits an
             on-chain event that becomes permanent, portable reputation.
@@ -184,15 +237,15 @@ export default function Landing() {
           {fixes.map((f, i) => (
             <RevealOnScroll key={f.title} delay={i * 0.08}>
               <motion.div
-                className="border border-rule p-5 bg-paper-bright h-full"
-                whileHover={{ y: -3, borderColor: "#1B1F24" }}
+                className="plate rounded p-6 h-full"
+                whileHover={{ y: -3 }}
                 transition={{ duration: 0.15 }}
               >
-                <div className="w-9 h-9 flex items-center justify-center border border-rule mb-3 text-stamp">
+                <div className="w-9 h-9 flex items-center justify-center border border-line rounded mb-4 text-accent">
                   <TemplateIcon id={f.icon} size={20} />
                 </div>
-                <p className="mb-2">{f.title}</p>
-                <p className="text-sm text-ink-soft">{f.body}</p>
+                <p className="mb-2 text-ink">{f.title}</p>
+                <p className="text-sm text-ink-body">{f.body}</p>
               </motion.div>
             </RevealOnScroll>
           ))}
@@ -200,10 +253,10 @@ export default function Landing() {
       </section>
 
       {/* CLOSING */}
-      <section className="py-16 border-t border-rule text-center">
+      <section className="py-24 border-t border-line text-center">
         <RevealOnScroll>
-          <Seal size={36} className="mx-auto mb-6" tone="stamp" />
-          <p className="font-serif text-xl italic mb-6 max-w-md mx-auto">
+          <Seal size={36} tone="accent" className="mx-auto mb-6" />
+          <p className="font-serif italic text-5xl mb-6 max-w-2xl mx-auto leading-[1.1]">
             &ldquo;Your contract is an ENS name. Your reputation is an event
             log. Neither belongs to us.&rdquo;
           </p>

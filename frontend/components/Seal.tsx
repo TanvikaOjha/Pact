@@ -1,11 +1,11 @@
 interface Props {
   size?: number;
   className?: string;
-  tone?: "ink" | "stamp";
+  tone?: "ink" | "accent";
 }
 
 export default function Seal({ size = 40, className = "", tone = "ink" }: Props) {
-  const color = tone === "stamp" ? "#1F5C46" : "#1B1F24";
+  const color = tone === "accent" ? "#2DD4BF" : "#F7F5F0";
   return (
     <svg
       width={size}

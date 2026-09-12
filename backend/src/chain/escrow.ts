@@ -4,6 +4,7 @@ import { sepolia } from "viem/chains";
 import { log } from "../services/log.js";
 
 /** Auto-generated getter for `mapping(bytes32 => mapping(uint256 => Milestone))`. */
+/* Appended M4 fields (evidenceHash, late) keep released/disputed positions. */
 const milestonesGetterAbi = [
   {
     type: "function",
@@ -17,6 +18,8 @@ const milestonesGetterAbi = [
       { name: "releaseAfter", type: "uint256" },
       { name: "released", type: "bool" },
       { name: "disputed", type: "bool" },
+      { name: "evidenceHash", type: "bytes32" },
+      { name: "late", type: "bool" },
     ],
   },
 ] as const;

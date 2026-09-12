@@ -3,7 +3,7 @@ import { Router, type NextFunction, type Request, type RequestHandler, type Resp
 import type { BusinessStore } from "../repos/businesses.js";
 import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
 import { runSweep, type AutoReleaseHandler } from "../services/scheduler.js";
-import type { IndexerArchive } from "../services/indexerArchive.js";
+import type { IndexerArchive } from "../services/indexer.js";
 import type { Notifier } from "../services/notifications.js";
 
 export interface SchedulerRouteOptions {

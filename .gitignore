@@ -69,6 +69,7 @@ contracts/cache/
 contracts/out/
 contracts/broadcast/
 contracts/lib/
+contracts/foundry.lock
 
 # Supabase local
 supabase/.branches/

@@ -4,7 +4,14 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import type { BusinessRow, BusinessStore } from "../repos/businesses.js";
-import type { DisputeVoteRow, DisputeVoteStore, NewDisputeVote } from "../repos/disputes.js";
+import type {
+  DisputeProposalRow,
+  DisputeProposalStore,
+  DisputeVoteRow,
+  DisputeVoteStore,
+  NewDisputeProposal,
+  NewDisputeVote,
+} from "../repos/disputes.js";
 import type { EmailMessage } from "../services/notifications.js";import type {
   EngagementRow,
   EngagementStatus,
@@ -51,6 +58,7 @@ function createStores() {
   const engagements: EngagementRow[] = [];
   const milestones: MilestoneRow[] = [];
   const votes: DisputeVoteRow[] = [];
+  const proposals: DisputeProposalRow[] = [];
 
   const businessStore: BusinessStore = {
     findById: async (id: string) => businesses.find((row) => row.id === id) ?? null,
@@ -192,13 +200,63 @@ function createStores() {
     hasVotesForEngagement: async (engagementId: string) =>
       votes.some((vote) => vote.engagement_id === engagementId),
   };
-  return { businessStore, engagementStore, milestoneStore, voteStore };
+  const proposalStore: DisputeProposalStore = {
+    findProposal: async (engagementId: string, milestoneIndex: number) =>
+      proposals.find(
+        (proposal) =>
+          proposal.engagement_id === engagementId && proposal.milestone_index === milestoneIndex,
+      ) ?? null,
+    upsertProposal: async (row: NewDisputeProposal) => {
+      const existing = proposals.find(
+        (proposal) =>
+          proposal.engagement_id === row.engagementId && proposal.milestone_index === row.milestoneIndex,
+      );
+      if (existing !== undefined) {
+        existing.provider_amount = row.providerAmount;
+        existing.client_refund = row.clientRefund;
+        existing.proposer_wallet = row.proposerWallet;
+        existing.challenge_deadline = row.challengeDeadline;
+        return existing;
+      }
+      const created: DisputeProposalRow = {
+        engagement_id: row.engagementId,
+        milestone_index: row.milestoneIndex,
+        provider_amount: row.providerAmount,
+        client_refund: row.clientRefund,
+        proposer_wallet: row.proposerWallet,
+        challenge_deadline: row.challengeDeadline,
+        challenged: false,
+        executed_at: null,
+      };
+      proposals.push(created);
+      return created;
+    },
+    markChallenged: async (engagementId: string, milestoneIndex: number) => {
+      const proposal = proposals.find(
+        (candidate) =>
+          candidate.engagement_id === engagementId && candidate.milestone_index === milestoneIndex,
+      );
+      if (proposal !== undefined) proposal.challenged = true;
+    },
+    markExecuted: async (engagementId: string, milestoneIndex: number, executedAt: string) => {
+      const proposal = proposals.find(
+        (candidate) =>
+          candidate.engagement_id === engagementId && candidate.milestone_index === milestoneIndex,
+      );
+      if (proposal !== undefined) proposal.executed_at = executedAt;
+    },
+    listOpen: async () => proposals.filter((proposal) => proposal.executed_at === null),
+  };
+  return { businessStore, engagementStore, milestoneStore, voteStore, proposalStore, proposals };
 }
 
 interface DisputeEnvelope {
   error?: string;
   disputed?: boolean;
   resolved?: boolean;
+  proposed?: boolean;
+  challenged?: boolean;
+  challengeDeadline?: string;
   releasedAt?: string;
   engagementCompleted?: boolean;
   id?: string;
@@ -236,9 +294,11 @@ describe("disputes", () => {
   let server: Server | null = null;
   let port = 0;
   const notifier = createCapturingNotifier();
+  let proposals: DisputeProposalRow[] = [];
 
   beforeAll(async () => {
     const stores = createStores();
+    proposals = stores.proposals;
     const app = express();
     app.use(express.json());
     app.use((req, _res, next) => {
@@ -269,6 +329,7 @@ describe("disputes", () => {
         milestones: stores.milestoneStore,
         businesses: stores.businessStore,
         votes: stores.voteStore,
+        proposals: stores.proposalStore,
         reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
         notify: notifier.notify,
         checkDisputed: null,
@@ -419,5 +480,105 @@ describe("disputes", () => {
     );
     expect(settled.status).toBe(409);
     expect(settled.body.error).toBe("not_disputed");
+  });
+
+  test("resolve-propose stores the proposal and notifies; rejects bad sums and undisputed", async () => {
+    const created = await api(
+      port,
+      "/api/engagements",
+      WALLET_A,
+      JSON.stringify({ ...MILESTONE, onChainId: "offchain-dispute-3" }),
+    );
+    expect(created.status).toBe(201);
+    const id = created.body.id ?? "";
+    await api(port, `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+
+    const undisputed = await api(
+      port,
+      `/api/engagements/${id}/milestones/0/resolve-propose`,
+      WALLET_A,
+      JSON.stringify({ providerAmount: 1200, clientRefund: 800 }),
+    );
+    expect(undisputed.status).toBe(409);
+    expect(undisputed.body.error).toBe("not_disputed");
+
+    await api(port, `/api/engagements/${id}/milestones/0/dispute`, WALLET_A);
+
+    const mismatch = await api(
+      port,
+      `/api/engagements/${id}/milestones/0/resolve-propose`,
+      WALLET_A,
+      JSON.stringify({ providerAmount: 1000, clientRefund: 0 }),
+    );
+    expect(mismatch.status).toBe(400);
+    expect(mismatch.body.error).toBe("amounts_mismatch");
+
+    const outsider = await api(
+      port,
+      `/api/engagements/${id}/milestones/0/resolve-propose`,
+      OUTSIDER,
+      JSON.stringify({ providerAmount: 1200, clientRefund: 800 }),
+    );
+    expect(outsider.status).toBe(403);
+
+    const proposed = await api(
+      port,
+      `/api/engagements/${id}/milestones/0/resolve-propose`,
+      WALLET_A,
+      JSON.stringify({ providerAmount: 1200, clientRefund: 800 }),
+    );
+    expect(proposed.status).toBe(200);
+    expect(proposed.body.proposed).toBe(true);
+    expect(proposed.body.challengeDeadline ?? "").not.toBe("");
+    const stored = proposals.find(
+      (proposal) => proposal.engagement_id === id && proposal.milestone_index === 0,
+    );
+    expect(stored?.provider_amount).toBe(1200);
+    expect(stored?.proposer_wallet).toBe(WALLET_A);
+    const proposeMail = notifier.sent.at(-1);
+    expect(proposeMail?.to).toBe("biz-b@example.com");
+    expect(proposeMail?.subject.includes("Resolution proposed")).toBe(true);
+  });
+
+  test("resolve-challenge rejects self-challenge, marks and notifies the proposer", async () => {
+    const created = await api(
+      port,
+      "/api/engagements",
+      WALLET_A,
+      JSON.stringify({ ...MILESTONE, onChainId: "offchain-dispute-4" }),
+    );
+    expect(created.status).toBe(201);
+    const id = created.body.id ?? "";
+    await api(port, `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+    await api(port, `/api/engagements/${id}/milestones/0/dispute`, WALLET_A);
+    await api(
+      port,
+      `/api/engagements/${id}/milestones/0/resolve-propose`,
+      WALLET_A,
+      JSON.stringify({ providerAmount: 1500, clientRefund: 500 }),
+    );
+
+    const self = await api(
+      port,
+      `/api/engagements/${id}/milestones/0/resolve-challenge`,
+      WALLET_A,
+    );
+    expect(self.status).toBe(400);
+    expect(self.body.error).toBe("self_challenge");
+
+    const challenged = await api(
+      port,
+      `/api/engagements/${id}/milestones/0/resolve-challenge`,
+      WALLET_B,
+    );
+    expect(challenged.status).toBe(200);
+    expect(challenged.body.challenged).toBe(true);
+    const stored = proposals.find(
+      (proposal) => proposal.engagement_id === id && proposal.milestone_index === 0,
+    );
+    expect(stored?.challenged).toBe(true);
+    const challengeMail = notifier.sent.at(-1);
+    expect(challengeMail?.to).toBe("biz-a@example.com");
+    expect(challengeMail?.subject.includes("Resolution challenged")).toBe(true);
   });
 });

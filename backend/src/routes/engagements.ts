@@ -39,7 +39,27 @@ const createEngagementSchema = z.object({
   onChainId: z.string().min(1).default("offchain"),
   ensSubname: z.string().min(1).default("pending.pact-hack.eth"),
   milestones: z.array(milestoneInputSchema).max(5).default([]),
+  visibility: z.enum(["public", "commit"]).default("public"),
+  defaultProviderBps: z.number().int().min(0).max(10000).nullable().default(null),
+  challengeWindowSeconds: z.number().int().positive().nullable().default(null),
 });
+
+const EVIDENCE_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+
+const submitBodySchema = z.object({
+  evidenceHash: z.string().regex(EVIDENCE_HASH_PATTERN).nullish(),
+});
+
+/** M3-executed releases mirror via this flag; only the selfie gate is skipped. */
+const releaseBodySchema = z.object({
+  viaExecute: z.boolean().optional(),
+});
+
+/** Mirror-only lateness for display; the chain flag is authoritative. */
+function isLateMirror(dueDate: string | null, submittedAt: string): boolean {
+  if (dueDate === null) return false;
+  return Date.parse(dueDate) < Date.parse(submittedAt);
+}
 
 export interface EngagementsRouteOptions {
   engagements: EngagementStore;
@@ -139,6 +159,9 @@ async function handleCreate(
     templateType: draft.templateType,
     termsHash: draft.termsHash,
     totalAmount: draft.totalAmount,
+    visibility: draft.visibility,
+    defaultProviderBps: draft.defaultProviderBps,
+    challengeWindowSeconds: draft.challengeWindowSeconds,
   });
   await options.milestones.insertMany(
     draft.milestones.map((milestone) => ({
@@ -203,15 +226,22 @@ async function handleSubmit(
     res.status(409).json({ error: "already_submitted", releaseAfter: releaseAfter(milestone.submitted_at) });
     return;
   }
+  const body = submitBodySchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ error: "invalid_request" });
+    return;
+  }
+  const evidenceHash = body.data.evidenceHash ?? null;
   const submittedAt = new Date().toISOString();
-  await options.milestones.markSubmitted(milestone.id, submittedAt);
+  const late = isLateMirror(milestone.due_date, submittedAt);
+  await options.milestones.markSubmitted(milestone.id, submittedAt, evidenceHash, late);
   log.info(`completion submitted: engagement ${engagement.id} milestone ${index}`);
   await notifyAll(
     options.notify,
     await recipientEmails(options.businesses, engagement, business.id),
     completionSubmittedEmail(engagement.ens_subname, milestone.name, index, milestone.amount, releaseAfter(submittedAt)),
   );
-  res.json({ submittedAt, releaseAfter: releaseAfter(submittedAt) });
+  res.json({ submittedAt, releaseAfter: releaseAfter(submittedAt), evidenceHash, late });
 }
 
 export async function loadMilestoneContext(
@@ -254,6 +284,8 @@ export async function loadMilestoneContext(
  * Record an on-chain milestone release in the mirror. When escrow reads are
  * available the chain must confirm `released`, otherwise nothing is recorded.
  * Completes the engagement once every milestone is released.
+ * `viaExecute` mirrors an M3 executeResolution release: it skips only the
+ * high-value World session gate; the chain isReleased check still applies.
  */
 async function handleRelease(
   req: Request,
@@ -275,7 +307,13 @@ async function handleRelease(
     res.status(409).json({ error: "not_submitted" });
     return;
   }
-  if (milestone.amount >= options.highValueThreshold && milestone.world_session_id === null) {
+  const body = releaseBodySchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ error: "invalid_request" });
+    return;
+  }
+  const viaExecute = body.data.viaExecute ?? false;
+  if (!viaExecute && milestone.amount >= options.highValueThreshold && milestone.world_session_id === null) {
     res.status(409).json({
       error: "world_attestation_required",
       threshold: options.highValueThreshold,

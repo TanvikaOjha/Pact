@@ -1,61 +1,67 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { useStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
+import { loadEngagements } from "@/lib/utils";
 import { TEMPLATES, CUSTOM_TEMPLATE } from "@/lib/templates";
-import TemplateIcon from "../../components/TemplateIcon";
-import RevealOnScroll from "../../components/RevealOnScroll";
-
-const ACCENTS: Record<string, string> = {
-  fixed: "text-stamp border-stamp/40",
-  milestone: "text-slate border-slate/40",
-  retainer: "text-ember border-ember/40",
-  "t-and-m": "text-slate border-slate/40",
-  recurring: "text-stamp border-stamp/40",
-  split: "text-ember border-ember/40",
-};
+import TemplateIcon from "@/components/TemplateIcon";
+import RevealOnScroll from "@/components/RevealOnScroll";
+import { ParticleReveal } from "@/components/canvas/ParticleReveal";
 
 export default function TemplatePicker() {
-  const { currentBusiness, engagementsForCurrentBusiness } = useStore();
+  const { walletAddress, ready } = useAuth();
   const router = useRouter();
+  const engagements = useMemo(() => {
+    if (!walletAddress) return [];
+    return Object.values(loadEngagements())
+      .filter((e) => e.proposerWallet.toLowerCase() === walletAddress.toLowerCase())
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  }, [walletAddress]);
 
   useEffect(() => {
-    if (!currentBusiness) router.replace("/identity");
-  }, [currentBusiness, router]);
+    if (ready && !walletAddress) router.replace("/identity");
+  }, [ready, walletAddress, router]);
 
-  if (!currentBusiness) return null;
+  if (!ready || !walletAddress) return null;
 
   return (
     <div className="py-14">
-      <p className="mono-tag text-ink-faint mb-2">{currentBusiness.ensSubname}</p>
-      <h1 className="font-serif text-3xl mb-8">Start an engagement</h1>
+      <p className="mono-tag text-accent mb-2">Proposal → sign → fund → deliver → release</p>
+      <h1 className="text-3xl font-medium tracking-[-0.8px] mb-8">Start an engagement</h1>
 
       <div className="grid sm:grid-cols-3 gap-4 mb-4">
         {TEMPLATES.map((t, i) => (
-          <RevealOnScroll key={t.id} delay={i * 0.06}>
+          <RevealOnScroll key={t.id} delay={i * 0.06} className="h-full">
             <Link href={`/templates/${t.id}`} className="block h-full">
+              <ParticleReveal
+                className="h-full rounded"
+                background="#383330"
+                radius={320}
+                aberration={0}
+                bend={20}
+                drift={0.4}
+                scatter={12}
+              >
               <motion.div
                 whileHover={{ y: -4 }}
                 transition={{ duration: 0.15 }}
-                className="plate p-5 h-full relative overflow-hidden"
+                className="plate rounded p-5 h-full"
               >
-                <span className="absolute top-0 right-0 w-6 h-6 bg-paper border-l border-b border-rule" />
-                <div
-                  className={`w-10 h-10 flex items-center justify-center border mb-4 ${ACCENTS[t.id]}`}
-                >
+                <div className="w-10 h-10 flex items-center justify-center border border-line rounded mb-4 text-accent">
                   <TemplateIcon id={t.id} size={22} />
                 </div>
-                <p className="mb-2">{t.name}</p>
-                <p className="text-sm text-ink-soft mb-4">{t.useCase}</p>
-                <ul className="text-xs text-ink-faint space-y-1">
+                <p className="mb-2 text-ink">{t.name}</p>
+                <p className="text-sm text-ink-body mb-4">{t.useCase}</p>
+                <ul className="text-xs text-ink-mute space-y-1">
                   {t.bullets.map((b) => (
-                    <li key={b}>{b}</li>
+                    <li key={b}>› {b}</li>
                   ))}
                 </ul>
               </motion.div>
+              </ParticleReveal>
             </Link>
           </RevealOnScroll>
         ))}
@@ -66,12 +72,12 @@ export default function TemplatePicker() {
           <motion.div
             whileHover={{ y: -3 }}
             transition={{ duration: 0.15 }}
-            className="plate p-5 text-center flex items-center justify-center gap-3"
+            className="plate rounded p-5 text-center flex items-center justify-center gap-3"
           >
-            <TemplateIcon id="custom" size={20} className="text-ink-faint" />
+            <TemplateIcon id="custom" size={20} className="text-ink-mute" />
             <div>
-              <p>Build something custom →</p>
-              <p className="text-sm text-ink-soft mt-1">
+              <p className="text-ink">Build something custom →</p>
+              <p className="text-sm text-ink-body mt-1">
                 A six-question guided flow for the other ~10%.
               </p>
             </div>
@@ -79,26 +85,21 @@ export default function TemplatePicker() {
         </Link>
       </RevealOnScroll>
 
-      {engagementsForCurrentBusiness.length > 0 && (
-        <div className="mt-14 pt-8 border-t border-rule">
-          <p className="text-sm text-ink-faint mb-4">Your engagements</p>
-          {engagementsForCurrentBusiness.map((e) => (
+      {engagements.length > 0 && (
+        <div className="mt-14 pt-8 border-t border-line">
+          <p className="text-sm text-ink-mute mb-4">Your engagements</p>
+          {engagements.map((e) => (
             <Link
               key={e.id}
-              href={
-                e.status === "proposed" && e.partyAId === currentBusiness.id
-                  ? `/proposal/${e.id}`
-                  : `/engagement/${e.id}`
-              }
-              className="registry-row py-3 flex items-center gap-4 text-sm block hover:bg-paper-bright"
+              href={e.status === "PROPOSED" ? `/proposal/${e.proposalToken}` : `/engagement/${e.id}`}
+              className="registry-row py-3 flex items-center gap-4 text-sm hover:bg-canvas-soft px-2"
             >
-              <TemplateIcon id={e.templateType} size={16} className="text-ink-faint shrink-0" />
-              <span className="w-40 truncate">{e.title}</span>
-              <span className="font-mono text-ink-faint w-40 truncate">
+              <span className="w-40 truncate text-ink">{e.title}</span>
+              <span className="font-mono text-xs text-ink-mute w-44 truncate">
                 {e.ensSubname}
               </span>
-              <span className="text-ink-faint w-24 capitalize">{e.status}</span>
-              <span className="font-mono ml-auto">
+              <span className="text-ink-mute w-24 capitalize text-xs">{e.status.toLowerCase()}</span>
+              <span className="font-mono ml-auto text-ink-body">
                 ${e.totalAmount.toLocaleString()}
               </span>
             </Link>

@@ -4,13 +4,12 @@ import { getSupabase } from "./config/supabase.js";
 import { getRegistryReader } from "./chain/registry.js";
 import { getEscrowReader } from "./chain/escrow.js";
 import { errorHandler, requestId } from "./middleware/http.js";
-import { createRequireAuth, createPrivyVerifier, getPrivyClient } from "./middleware/privyAuth.js";
-import { createRequireCronOrAuth } from "./middleware/cronAuth.js";
-import { createIndexerArchive } from "./services/indexerArchive.js";
+import { createRequireAuth, createPrivyVerifier, createRequireCronOrAuth, getPrivyClient } from "./middleware/privyAuth.js";
+import { createIndexerArchive } from "./services/indexer.js";
 import { createSupabaseBusinessStore } from "./repos/businesses.js";
-import { createSupabaseDisputeVoteStore } from "./repos/disputes.js";
+import { createSupabaseDisputeVoteStore, createSupabaseDisputeProposalStore } from "./repos/disputes.js";
 import { createSupabaseReputationStore } from "./repos/reputation.js";
-import { createSupabaseEngagementStore, createSupabaseMilestoneStore } from "./repos/engagements.js";
+import { createSupabaseBondStore, createSupabaseEngagementStore, createSupabaseMilestoneStore } from "./repos/engagements.js";
 import { createSupabaseProposalStore } from "./repos/proposals.js";
 import { healthRouter } from "./routes/health.js";
 import { meRouter } from "./routes/me.js";
@@ -133,6 +132,9 @@ export function createApp() {
       votes: createSupabaseDisputeVoteStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+      proposals: createSupabaseDisputeProposalStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
       reputation: createSupabaseReputationStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
@@ -148,6 +150,9 @@ export function createApp() {
     createReputationRouter({
       businesses: businessStore,
       reputation: createSupabaseReputationStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      engagements: createSupabaseEngagementStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
     }),
@@ -178,6 +183,9 @@ export function createApp() {
     escrowAddress: env.PACT_ESCROW_ADDRESS ?? "",
     businesses: businessStore,
     reputation: createSupabaseReputationStore(
+      getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+    ),
+    bonds: createSupabaseBondStore(
       getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
     ),
     archive: indexerArchive,

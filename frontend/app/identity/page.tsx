@@ -3,45 +3,91 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { useStore } from "@/lib/store";
-import { slugify } from "@/lib/utils";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { useAuth } from "@/lib/auth";
+import { useToast } from "@/components/Toaster";
+import { slugify, saveSubnameFor } from "@/lib/utils";
+import { ApiError } from "@/lib/api";
 import TerminalBlock from "@/components/TerminalBlock";
-import Seal from "../../components/Seal";
+import WorldSelfieModal from "@/components/WorldSelfieModal";
+import Seal from "@/components/Seal";
 
 const STAGES = ["wallet", "ens", "world"] as const;
 
-function stageFromStep(step: string | null): number {
-  if (!step) return -1;
-  if (step.toLowerCase().includes("wallet")) return 0;
-  if (step.toLowerCase().includes("ens")) return 1;
-  if (step.toLowerCase().includes("selfie") || step.toLowerCase().includes("world")) return 2;
-  return 2;
-}
-
 export default function IdentityPage() {
-  const { createBusiness, currentBusiness } = useStore();
+  const { api, walletAddress, signInDev } = useAuth();
+  const { pushToast } = useToast();
   const router = useRouter();
+  const [wallet, setWallet] = useState(walletAddress ?? "");
+  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [step, setStep] = useState<string | null>(null);
-  const [done, setDone] = useState(currentBusiness ?? null);
+  const [selfie, setSelfie] = useState(false);
+  const [done, setDone] = useState<{
+    ensSubname: string;
+    walletAddress: string;
+    worldSessionId: string;
+    email: string;
+  } | null>(null);
 
   const slug = slugify(name || "your-business");
-  const activeStage = stageFromStep(step);
+
+  function activeStage(): number {
+    if (!step) return -1;
+    const s = step.toLowerCase();
+    if (s.includes("wallet")) return 0;
+    if (s.includes("ens") || s.includes("register")) return 1;
+    return 2;
+  }
+
+  function generateWallet() {
+    setWallet(privateKeyToAccount(generatePrivateKey()).address);
+  }
 
   async function handleCreate() {
-    if (!name.trim()) return;
-    setStep("Starting...");
-    const biz = await createBusiness(name, (s) => setStep(s));
-    setStep(null);
-    setDone(biz);
+    if (!wallet.trim() || !name.trim()) return;
+    setSelfie(true);
+  }
+
+  async function handleSelfieDone() {
+    setSelfie(false);
+    const address = wallet.trim();
+    signInDev(address);
+    try {
+      setStep("Verifying World selfie proof...");
+      await api.verifyWorld({ responses: [] });
+      setStep("Registering business on-chain...");
+      const res = await api.registerBusiness({
+        slug,
+        proof: { responses: [] },
+        email: email.trim() === "" ? undefined : email.trim(),
+      });
+      saveSubnameFor(res.walletAddress, res.ensSubname);
+      setStep(null);
+      setDone({
+        ensSubname: res.ensSubname,
+        walletAddress: res.walletAddress,
+        worldSessionId: res.worldSessionId,
+        email: email.trim(),
+      });
+      pushToast("Identity active — business registered.", "accent");
+    } catch (err) {
+      setStep(null);
+      pushToast(
+        err instanceof ApiError
+          ? `Registration failed (${err.code ?? err.status}).`
+          : "Registration failed.",
+        "danger",
+      );
+    }
   }
 
   if (done) {
     return (
       <div className="max-w-md py-16">
-        <p className="mono-tag text-ink-faint mb-4">Identity active</p>
+        <p className="mono-tag text-ink-mute mb-4">Identity active</p>
         <motion.div
-          className="border border-rule bg-paper-bright p-6 mb-6 relative overflow-hidden"
+          className="plate rounded p-6 mb-6 relative overflow-hidden"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
@@ -52,20 +98,20 @@ export default function IdentityPage() {
             animate={{ opacity: 0.9, scale: 1, rotate: -6 }}
             transition={{ delay: 0.3, duration: 0.5, ease: [0.2, 0.9, 0.25, 1.1] }}
           >
-            <Seal size={44} tone="stamp" />
+            <Seal size={44} tone="accent" />
           </motion.div>
-          <p className="font-serif text-2xl mb-1">{done.ensSubname}</p>
-          <p className="text-sm text-stamp mb-4">World verified ✓</p>
+          <p className="text-2xl mb-1 text-ink">{done.ensSubname}</p>
+          <p className="text-sm text-accent mb-4">World verified ✓</p>
           <TerminalBlock
             records={[
               ["pact:world-verified", done.worldSessionId],
-              ["pact:joined", new Date(done.joinedAt).toISOString().slice(0, 10)],
               ["wallet", done.walletAddress],
+              ["status", "pending_onchain"],
             ]}
-            etherscanLabel="View on Etherscan"
+            footnote="mint the subname + fund to activate on-chain"
           />
         </motion.div>
-        <p className="text-sm text-ink-soft mb-6">
+        <p className="text-sm text-ink-body mb-6">
           That ENS subname is yours. Pact can&rsquo;t revoke it — it&rsquo;ll
           outlive this platform. Your engagement history builds here from
           now on.
@@ -84,10 +130,39 @@ export default function IdentityPage() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
     >
-      <p className="mono-tag text-ink-faint mb-4">Step 1 of 1</p>
-      <h1 className="font-serif text-3xl mb-6">Your business on Pact</h1>
+      {selfie && (
+        <WorldSelfieModal
+          reason="Activating your business identity"
+          onDone={() => void handleSelfieDone()}
+        />
+      )}
+      <p className="mono-tag text-ink-mute mb-4">Identity setup</p>
+      <h1 className="text-3xl font-medium tracking-[-0.8px] mb-6">Your business on Pact</h1>
 
-      <label className="block text-sm mb-2">Business name</label>
+      <label className="block text-sm mb-2 text-ink-body">Wallet address</label>
+      <div className="flex gap-2 mb-5">
+        <input
+          className="field-input font-mono text-sm"
+          placeholder="0x…"
+          value={wallet}
+          onChange={(e) => setWallet(e.target.value)}
+          disabled={!!step}
+        />
+        <button onClick={generateWallet} disabled={!!step} className="btn-ghost text-sm shrink-0">
+          New
+        </button>
+      </div>
+
+      <label className="block text-sm mb-2 text-ink-body">Email (for notifications)</label>
+      <input
+        className="field-input mb-5"
+        placeholder="you@studio.co"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        disabled={!!step}
+      />
+
+      <label className="block text-sm mb-2 text-ink-body">Business name</label>
       <input
         className="field-input mb-1"
         placeholder="e.g. Harbor Studio"
@@ -95,11 +170,11 @@ export default function IdentityPage() {
         onChange={(e) => setName(e.target.value)}
         disabled={!!step}
       />
-      <p className="mono-tag text-ink-faint mb-6">{slug}.pact-hack.eth</p>
+      <p className="mono-tag text-accent mb-6">{slug}.pact.eth</p>
 
       <button
-        onClick={handleCreate}
-        disabled={!name.trim() || !!step}
+        onClick={() => void handleCreate()}
+        disabled={!name.trim() || !wallet.trim() || !!step}
         className="btn-primary w-full"
       >
         {step ? "Working..." : "Create identity"}
@@ -115,24 +190,24 @@ export default function IdentityPage() {
           >
             <div className="flex items-center gap-2 mb-2">
               {STAGES.map((s, i) => (
-                <div key={s} className="flex-1 h-1 bg-rule overflow-hidden">
+                <div key={s} className="flex-1 h-1 bg-line overflow-hidden">
                   <motion.div
-                    className="h-1 bg-stamp"
+                    className="h-1 bg-accent"
                     initial={{ width: 0 }}
-                    animate={{ width: i <= activeStage ? "100%" : 0 }}
+                    animate={{ width: i <= activeStage() ? "100%" : 0 }}
                     transition={{ duration: 0.5 }}
                   />
                 </div>
               ))}
             </div>
-            <p className="text-xs text-ink-faint cursor-blink">{step}</p>
+            <p className="text-xs text-ink-mute cursor-blink">{step}</p>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <p className="text-xs text-ink-faint mt-8">
-        Email only — Privy creates your embedded wallet behind the scenes.
-        No seed phrase, no gas prompt.
+      <p className="text-xs text-ink-mute mt-8">
+        Dev seam: paste any test wallet or generate one. Privy embedded
+        wallets land here — the API already speaks Bearer tokens.
       </p>
     </motion.div>
   );

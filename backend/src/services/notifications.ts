@@ -231,3 +231,51 @@ export function disputeStaleEmail(ensSubname: string, name: string | null, index
     ].join("\n"),
   };
 }
+
+export function resolutionProposedEmail(
+  ensSubname: string,
+  name: string | null,
+  index: number,
+  providerAmount: number,
+  clientRefund: number,
+): EmailContent {
+  return {
+    subject: `Resolution proposed: ${ensSubname}`,
+    text: [
+      `Your counterparty proposed resolving ${milestoneLabel(name, index)} on`,
+      `engagement ${ensSubname} as ${providerAmount} to provider / ${clientRefund} refund.`,
+      `Challenge before the deadline or it executes automatically.`,
+    ].join("\n"),
+  };
+}
+
+export function resolutionChallengedEmail(
+  ensSubname: string,
+  name: string | null,
+  index: number,
+): EmailContent {
+  return {
+    subject: `Resolution challenged: ${ensSubname}`,
+    text: [
+      `Your proposed resolution for ${milestoneLabel(name, index)} on`,
+      `engagement ${ensSubname} was challenged. The pre-agreed default`,
+      `split executes at the challenge deadline.`,
+    ].join("\n"),
+  };
+}
+
+export function challengeClosingEmail(
+  ensSubname: string,
+  name: string | null,
+  index: number,
+  challengeDeadline: string,
+): EmailContent {
+  return {
+    subject: `Challenge window closing: ${ensSubname}`,
+    text: [
+      `The challenge window for ${milestoneLabel(name, index)} on`,
+      `engagement ${ensSubname} closes at ${challengeDeadline}.`,
+      `Challenge or accept before then; the proposal executes after.`,
+    ].join("\n"),
+  };
+}

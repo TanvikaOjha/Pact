@@ -14,6 +14,10 @@ export interface EngagementRow {
   status: EngagementStatus;
   created_at: string;
   completed_at: string | null;
+  /** Optional: absent on rows written before migration 0007. */
+  visibility?: string | null;
+  default_provider_bps?: number | null;
+  challenge_window_seconds?: number | null;
 }
 
 export interface NewEngagement {
@@ -24,6 +28,9 @@ export interface NewEngagement {
   templateType: number;
   termsHash: string;
   totalAmount: number;
+  visibility?: string;
+  defaultProviderBps?: number | null;
+  challengeWindowSeconds?: number | null;
 }
 
 export interface EngagementStore {
@@ -36,6 +43,12 @@ export interface EngagementStore {
 export interface EngagementStatusPatch {
   status: EngagementStatus;
   completed_at?: string;
+}
+
+interface MilestoneSubmitPatch {
+  submitted_at: string;
+  evidence_hash?: string | null;
+  late?: boolean;
 }
 
 export interface MilestoneRow {
@@ -52,6 +65,9 @@ export interface MilestoneRow {
   world_session_id: string | null;
   /** Optional: absent on rows written before migration 0006. */
   disputed_at?: string | null;
+  /** Optional: absent on rows written before migration 0007. */
+  evidence_hash?: string | null;
+  late?: boolean;
 }
 
 export interface NewMilestone {
@@ -69,7 +85,12 @@ export interface MilestoneStore {
   listDisputed(): Promise<MilestoneRow[]>;
   findByIndex(engagementId: string, index: number): Promise<MilestoneRow | null>;
   insertMany(milestones: NewMilestone[]): Promise<MilestoneRow[]>;
-  markSubmitted(id: string, submittedAt: string): Promise<MilestoneRow | null>;
+  markSubmitted(
+    id: string,
+    submittedAt: string,
+    evidenceHash?: string | null,
+    late?: boolean,
+  ): Promise<MilestoneRow | null>;
   markReleased(id: string, releasedAt: string): Promise<MilestoneRow | null>;
   setDisputed(id: string, disputed: boolean): Promise<MilestoneRow | null>;
   markResolved(id: string, releasedAt: string): Promise<MilestoneRow | null>;
@@ -113,6 +134,9 @@ export function createSupabaseEngagementStore(client: SupabaseClient): Engagemen
           terms_hash: engagement.termsHash,
           total_amount: engagement.totalAmount,
           status: "PROPOSED",
+          visibility: engagement.visibility ?? "public",
+          default_provider_bps: engagement.defaultProviderBps ?? null,
+          challenge_window_seconds: engagement.challengeWindowSeconds ?? null,
         })
         .select()
         .returns<EngagementRow[]>();
@@ -201,10 +225,18 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
       if (result.error) throw new Error(`milestone insert failed: ${result.error.message}`);
       return result.data ?? [];
     },
-    async markSubmitted(id: string, submittedAt: string): Promise<MilestoneRow | null> {
+    async markSubmitted(
+      id: string,
+      submittedAt: string,
+      evidenceHash?: string | null,
+      late?: boolean,
+    ): Promise<MilestoneRow | null> {
+      const patch: MilestoneSubmitPatch = { submitted_at: submittedAt };
+      if (evidenceHash !== undefined) patch.evidence_hash = evidenceHash;
+      if (late !== undefined) patch.late = late;
       const result = await client
         .from("milestones")
-        .update({ submitted_at: submittedAt })
+        .update(patch)
         .eq("id", id)
         .select()
         .returns<MilestoneRow[]>();
@@ -260,6 +292,82 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
         .returns<MilestoneRow[]>();
       if (result.error) throw new Error(`milestone lookup failed: ${result.error.message}`);
       return firstRow(result.data);
+    },
+  };
+}
+
+export interface BondRow {
+  engagement_id: string;
+  amount: number;
+  bonder_wallet: string;
+  posted_at: string;
+  frozen: boolean;
+  settled_at: string | null;
+  slashed_amount: number;
+}
+
+export interface NewBond {
+  engagementId: string;
+  amount: number;
+  bonderWallet: string;
+}
+
+export interface BondStore {
+  findByEngagement(engagementId: string): Promise<BondRow | null>;
+  recordPosted(row: NewBond): Promise<BondRow>;
+  setFrozen(engagementId: string, frozen: boolean): Promise<void>;
+  recordReturned(engagementId: string, settledAt: string): Promise<void>;
+  recordSlashed(engagementId: string, slashedAmount: number): Promise<void>;
+}
+
+/** Mirror of on-chain bond state (see PactEscrow BondPosted/Returned/Slashed/Frozen). */
+export function createSupabaseBondStore(client: SupabaseClient): BondStore {
+  return {
+    async findByEngagement(engagementId: string): Promise<BondRow | null> {
+      const result = await client
+        .from("bonds")
+        .select("*")
+        .eq("engagement_id", engagementId)
+        .limit(1)
+        .returns<BondRow[]>();
+      if (result.error) throw new Error(`bond lookup failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async recordPosted(row: NewBond): Promise<BondRow> {
+      const result = await client
+        .from("bonds")
+        .insert({
+          engagement_id: row.engagementId,
+          amount: row.amount,
+          bonder_wallet: row.bonderWallet,
+        })
+        .select()
+        .returns<BondRow[]>();
+      if (result.error) throw new Error(`bond insert failed: ${result.error.message}`);
+      const created = firstRow(result.data);
+      if (created === null) throw new Error("bond insert returned no row");
+      return created;
+    },
+    async setFrozen(engagementId: string, frozen: boolean): Promise<void> {
+      const result = await client
+        .from("bonds")
+        .update({ frozen })
+        .eq("engagement_id", engagementId);
+      if (result.error) throw new Error(`bond update failed: ${result.error.message}`);
+    },
+    async recordReturned(engagementId: string, settledAt: string): Promise<void> {
+      const result = await client
+        .from("bonds")
+        .update({ settled_at: settledAt })
+        .eq("engagement_id", engagementId);
+      if (result.error) throw new Error(`bond update failed: ${result.error.message}`);
+    },
+    async recordSlashed(engagementId: string, slashedAmount: number): Promise<void> {
+      const result = await client
+        .from("bonds")
+        .update({ slashed_amount: slashedAmount })
+        .eq("engagement_id", engagementId);
+      if (result.error) throw new Error(`bond update failed: ${result.error.message}`);
     },
   };
 }
