@@ -110,6 +110,19 @@ function createMemoryMilestoneStore(): MilestoneStore {
       if (row !== null) row.submitted_at = submittedAt;
       return row;
     },
+    setDisputed: async (id: string, disputed: boolean) => {
+      const row = rows.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) row.disputed = disputed;
+      return row;
+    },
+    markResolved: async (id: string, releasedAt: string) => {
+      const row = rows.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) {
+        row.disputed = false;
+        row.released_at = releasedAt;
+      }
+      return row;
+    },
     listSubmittedUnreleased: async () =>
       rows.filter(
         (row) => row.submitted_at !== null && row.released_at === null && !row.disputed,
@@ -192,7 +205,7 @@ describe("engagements", () => {
         engagements: createMemoryEngagementStore(),
         milestones: createMemoryMilestoneStore(),
         businesses: createMemoryBusinessStore(),
-        // Null chain reader: dev path records releases without on-chain proof.
+        // Null chain readers: dev paths record without on-chain proof.
         checkReleased: null,
       }),
     );

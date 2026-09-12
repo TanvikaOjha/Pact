@@ -68,6 +68,8 @@ export interface MilestoneStore {
   insertMany(milestones: NewMilestone[]): Promise<MilestoneRow[]>;
   markSubmitted(id: string, submittedAt: string): Promise<MilestoneRow | null>;
   markReleased(id: string, releasedAt: string): Promise<MilestoneRow | null>;
+  setDisputed(id: string, disputed: boolean): Promise<MilestoneRow | null>;
+  markResolved(id: string, releasedAt: string): Promise<MilestoneRow | null>;
 }
 
 function firstRow<T>(rows: T[] | null): T | null {
@@ -198,6 +200,26 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
       const result = await client
         .from("milestones")
         .update({ released_at: releasedAt })
+        .eq("id", id)
+        .select()
+        .returns<MilestoneRow[]>();
+      if (result.error) throw new Error(`milestone update failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async setDisputed(id: string, disputed: boolean): Promise<MilestoneRow | null> {
+      const result = await client
+        .from("milestones")
+        .update({ disputed })
+        .eq("id", id)
+        .select()
+        .returns<MilestoneRow[]>();
+      if (result.error) throw new Error(`milestone update failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async markResolved(id: string, releasedAt: string): Promise<MilestoneRow | null> {
+      const result = await client
+        .from("milestones")
+        .update({ disputed: false, released_at: releasedAt })
         .eq("id", id)
         .select()
         .returns<MilestoneRow[]>();

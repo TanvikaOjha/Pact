@@ -80,8 +80,8 @@ migrated once already (`verifyAuthToken` → `verifyAccessToken`, camelCase → 
 3. **Contracts:** nothing else. There is no `foundry.toml` — forge defaults apply. Do not add
    one unless requested.
 
-4. **DB:** apply `backend/supabase/migrations/0001_pact_core.sql` (the only migration — note
-   the path is `backend/supabase/`, not `./supabase/`) via `supabase db push` / `psql` /
+4. **DB:** apply `backend/supabase/migrations/*.sql` in order (note
+the path is `backend/supabase/`, not `./supabase/`) via `supabase db push` / `psql` /
    dashboard. Requires `pgcrypto`. Tables: `businesses`, `engagements` (status enum
    PROPOSED/ACTIVE/COMPLETED/DISPUTED/CANCELLED; `template_type` checked 1–6), `milestones`,
    `reputation_events`, `proposals` (ephemeral pre-signature link-flow table).
@@ -117,11 +117,14 @@ backend/
     POST /api/engagements/:id/milestones/:index/submit (completion notice,
     starts 48h acceptance window) + .../release (mirror on-chain release,
     chain-verified when configured; completes engagement on last release)
+    routes/disputes.ts   POST .../dispute (freeze + DISPUTED) + .../resolve
+    (co-signed split record; mutual match releases + reopens ACTIVE)
     routes/scheduler.ts  POST /api/scheduler/sweep (due-release detection;
     execution via session signer follows)
     repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
     repos/proposals.ts   ProposalStore (ephemeral drafts, 14d TTL)
     repos/engagements.ts EngagementStore + MilestoneStore (chain is authoritative)
+    repos/disputes.ts    DisputeVoteStore (co-sign quorum mirror)
     ens/pact-terms.ts    Terms-V1 canonicalizer — MUST stay byte-identical to
                          root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)
@@ -131,6 +134,7 @@ backend/
     repos/ens/         repos has businesses.ts; ens/ has pact-terms.ts (more ports
                          only after root scripts stabilize — never fork them)
   supabase/migrations/0001_pact_core.sql + 0002_business_session_unique.sql
+  + 0003_dispute_votes.sql
   oxlint.config.ts
   vitest.config.ts     scopes `npm test` to `src/**` (excludes submodule RuleTester files)
   tools/oxlint/anti-slop/    lint plugin (submodule; loaded by oxlint.config.ts)

@@ -26,6 +26,7 @@ const BYTES32_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 export interface EscrowReader {
   /** Null when the engagement isn't on-chain-trackable; boolean from chain otherwise. */
   isReleased(onChainId: string, index: number): Promise<boolean | null>;
+  isDisputed(onChainId: string, index: number): Promise<boolean | null>;
 }
 
 /** Null when chain config is absent; callers degrade explicitly. */
@@ -42,18 +43,27 @@ export function getEscrowReader(
   }
   const escrow = address;
   const client = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
+  async function readMilestone(onChainId: string, index: number) {
+    if (!BYTES32_PATTERN.test(onChainId)) return null;
+    // SAFETY: regex enforces 0x + 64 hex chars, exactly the bytes32 address shape.
+    const id = onChainId as `0x${string}`;
+    return client.readContract({
+      address: escrow,
+      abi: milestonesGetterAbi,
+      functionName: "milestones",
+      args: [id, BigInt(index)],
+    });
+  }
   return {
     isReleased: async (onChainId: string, index: number): Promise<boolean | null> => {
-      if (!BYTES32_PATTERN.test(onChainId)) return null;
-      // SAFETY: regex enforces 0x + 64 hex chars, exactly the bytes32 address shape.
-      const id = onChainId as `0x${string}`;
-      const milestone = await client.readContract({
-        address: escrow,
-        abi: milestonesGetterAbi,
-        functionName: "milestones",
-        args: [id, BigInt(index)],
-      });
+      const milestone = await readMilestone(onChainId, index);
+      if (milestone === null) return null;
       return milestone[4];
+    },
+    isDisputed: async (onChainId: string, index: number): Promise<boolean | null> => {
+      const milestone = await readMilestone(onChainId, index);
+      if (milestone === null) return null;
+      return milestone[5];
     },
   };
 }

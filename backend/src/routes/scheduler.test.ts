@@ -45,6 +45,8 @@ describe("POST /api/scheduler/sweep", () => {
       insertMany: async () => [],
       markSubmitted: async () => null,
       markReleased: async () => null,
+      setDisputed: async () => null,
+      markResolved: async () => null,
     };
     const app = express();
     app.use(express.json());

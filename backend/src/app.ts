@@ -6,11 +6,13 @@ import { getEscrowReader } from "./chain/escrow.js";
 import { errorHandler, requestId } from "./middleware/http.js";
 import { createRequireAuth, createPrivyVerifier, getPrivyClient } from "./middleware/privyAuth.js";
 import { createSupabaseBusinessStore } from "./repos/businesses.js";
+import { createSupabaseDisputeVoteStore } from "./repos/disputes.js";
 import { createSupabaseEngagementStore, createSupabaseMilestoneStore } from "./repos/engagements.js";
 import { createSupabaseProposalStore } from "./repos/proposals.js";
 import { healthRouter } from "./routes/health.js";
 import { meRouter } from "./routes/me.js";
 import { createBusinessesRouter } from "./routes/businesses.js";
+import { createDisputesRouter } from "./routes/disputes.js";
 import { createEngagementsRouter } from "./routes/engagements.js";
 import { createProposalsRouter } from "./routes/proposals.js";
 import { createSchedulerRouter } from "./routes/scheduler.js";
@@ -69,6 +71,24 @@ export function createApp() {
       milestones: createSupabaseMilestoneStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+    }),
+  );
+  apiRouter.use(
+    createDisputesRouter({
+      engagements: createSupabaseEngagementStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      milestones: createSupabaseMilestoneStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      businesses: businessStore,
+      votes: createSupabaseDisputeVoteStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      checkDisputed:
+        escrowReader === null
+          ? null
+          : (onChainId: string, index: number) => escrowReader.isDisputed(onChainId, index),
     }),
   );
   apiRouter.use(

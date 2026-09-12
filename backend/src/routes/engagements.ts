@@ -37,8 +37,14 @@ export interface EngagementsRouteOptions {
   checkReleased: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
 
-function isParty(engagement: EngagementRow, businessId: string): boolean {
+export function isParty(engagement: EngagementRow, businessId: string): boolean {
   return engagement.party_a_id === businessId || engagement.party_b_id === businessId;
+}
+
+export interface MilestoneContextDeps {
+  engagements: EngagementStore;
+  milestones: MilestoneStore;
+  businesses: BusinessStore;
 }
 
 /**
@@ -178,10 +184,10 @@ async function handleSubmit(
   res.json({ submittedAt, releaseAfter: releaseAfter(submittedAt) });
 }
 
-async function loadMilestoneContext(
+export async function loadMilestoneContext(
   req: Request,
   res: Response,
-  options: EngagementsRouteOptions,
+  options: MilestoneContextDeps,
 ): Promise<
   | { ok: false }
   | { ok: true; engagement: EngagementRow; milestone: MilestoneRow; index: number }
@@ -212,6 +218,24 @@ async function loadMilestoneContext(
     return { ok: false };
   }
   return { ok: true, engagement, milestone, index };
+}
+
+/**
+ * Shared mirror logic: flip the engagement to COMPLETED once every milestone
+ * carries a release timestamp. Used by both release recording and dispute
+ * resolution (both end with funds moved).
+ */
+export async function completeEngagementIfReleased(
+  engagements: EngagementStore,
+  milestones: MilestoneStore,
+  engagementId: string,
+): Promise<boolean> {
+  const remaining = await milestones.listByEngagement(engagementId);
+  const completed = remaining.length > 0 && remaining.every((candidate) => candidate.released_at !== null);
+  if (completed) {
+    await engagements.updateStatus(engagementId, "COMPLETED");
+  }
+  return completed;
 }
 
 /**
@@ -248,12 +272,11 @@ async function handleRelease(
   }
   const releasedAt = new Date().toISOString();
   await options.milestones.markReleased(milestone.id, releasedAt);
-  const remaining = await options.milestones.listByEngagement(engagement.id);
-  const engagementCompleted =
-    remaining.length > 0 && remaining.every((candidate) => candidate.released_at !== null);
-  if (engagementCompleted) {
-    await options.engagements.updateStatus(engagement.id, "COMPLETED");
-  }
+  const engagementCompleted = await completeEngagementIfReleased(
+    options.engagements,
+    options.milestones,
+    engagement.id,
+  );
   log.info(`milestone released: engagement ${engagement.id} milestone ${index}`);
   res.json({ releasedAt, engagementCompleted });
 }
