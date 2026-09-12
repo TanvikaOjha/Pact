@@ -5,6 +5,8 @@ import { getRegistryReader } from "./chain/registry.js";
 import { getEscrowReader } from "./chain/escrow.js";
 import { errorHandler, requestId } from "./middleware/http.js";
 import { createRequireAuth, createPrivyVerifier, getPrivyClient } from "./middleware/privyAuth.js";
+import { createRequireCronOrAuth } from "./middleware/cronAuth.js";
+import { createIndexerArchive } from "./services/indexerArchive.js";
 import { createSupabaseBusinessStore } from "./repos/businesses.js";
 import { createSupabaseDisputeVoteStore } from "./repos/disputes.js";
 import { createSupabaseReputationStore } from "./repos/reputation.js";
@@ -39,6 +41,13 @@ export function createApp() {
     allowDevAuth: env.ALLOW_DEV_AUTH,
     verifier: privyClient === null ? null : createPrivyVerifier(privyClient),
   });
+  // Machine callers (external cron, keepers) use a service secret; humans
+  // keep Privy Bearer auth. Either passes the scheduler surface below.
+  const requireCronOrAuth = createRequireCronOrAuth({
+    cronSecret: env.CRON_SECRET,
+    requireAuth,
+  });
+  const indexerArchive = createIndexerArchive();
   const notify = createNotifier(env.RESEND_API_KEY, env.NOTIFY_FROM_EMAIL);
   apiRouter.use(requireAuth);
   apiRouter.use(meRouter);
@@ -62,6 +71,7 @@ export function createApp() {
       ),
       ensRoot: env.ENS_ROOT_NAME,
       requireAuth,
+      notify,
     }),
   );
   apiRouter.use(
@@ -92,7 +102,12 @@ export function createApp() {
           : (onChainId: string, index: number) => escrowReader.isReleased(onChainId, index),
     }),
   );
-  apiRouter.use(
+  // Scheduler sits outside apiRouter on purpose: apiRouter enforces Privy
+  // user auth, while the sweep also accepts the CRON_SECRET service token
+  // for external cron. Detect+notify by default; wire requestAutoRelease
+  // here when a session-signer submission path exists.
+  app.use(
+    "/api",
     createSchedulerRouter({
       milestones: createSupabaseMilestoneStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
@@ -102,6 +117,8 @@ export function createApp() {
       ),
       businesses: businessStore,
       notify,
+      archive: indexerArchive,
+      auth: requireCronOrAuth,
     }),
   );
   apiRouter.use(
@@ -163,6 +180,7 @@ export function createApp() {
     reputation: createSupabaseReputationStore(
       getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
     ),
+    archive: indexerArchive,
   });
   if (watcher !== null) {
     log.info("pact completed indexer watching");

@@ -40,6 +40,7 @@ const envSchema = z.object({
   // requires a bound World Selfie Check session (spec Q1 default $5,000).
   WORLD_HIGH_VALUE_THRESHOLD: z.coerce.number().positive().default(5000),
   CRON_ENABLED: envFlag(true),
+  CRON_SECRET: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -23,8 +23,28 @@ export interface DueRelease {
 }
 
 /**
+ * Opt-in autoRelease execution. The sweep stays detect+notify by default
+ * (backend-optional release: either party can call the escrow directly);
+ * operators pass a handler — typically a Privy session-signer submission —
+ * to also attempt the on-chain `autoRelease` for each due milestone.
+ */
+export interface AutoReleaseRequest {
+  engagementId: string;
+  milestoneIndex: number;
+  releaseAfter: string;
+}
+
+export interface AutoReleaseResult {
+  attempted: boolean;
+  ok: boolean;
+  error: string | null;
+}
+
+export type AutoReleaseHandler = (request: AutoReleaseRequest) => Promise<AutoReleaseResult>;
+
+/**
  * Pure due-detection: submitted, window elapsed, neither released nor
- * disputed. Execution (session-signer autoRelease tx) is a later commit;
+ * disputed. Execution is opt-in via SweepDeps.requestAutoRelease;
  * sweep results feed notifications and the ops trigger until then.
  */
 export function findDueReleases(milestones: MilestoneRow[], now: string): DueRelease[] {
@@ -89,17 +109,27 @@ export interface SweepDeps {
   engagements: EngagementStore;
   businesses: BusinessStore;
   notify: Notifier;
+  requestAutoRelease?: AutoReleaseHandler;
+}
+
+export interface AutoReleaseSummary {
+  attempted: number;
+  succeeded: number;
+  failed: number;
 }
 
 export interface SweepResult {
   checkedAt: string;
   due: DueRelease[];
   closingSoon: number;
+  autoRelease: AutoReleaseSummary;
 }
 
 /**
  * Shared sweep core: due releases + closing-soon reminders + notifications.
  * Used by the manual POST /scheduler/sweep trigger and the cron loop alike.
+ * When requestAutoRelease is set, each due milestone is also offered to the
+ * handler; failures are counted and logged, never thrown.
  */
 export async function runSweep(deps: SweepDeps): Promise<SweepResult> {
   const checkedAt = new Date().toISOString();
@@ -109,7 +139,33 @@ export async function runSweep(deps: SweepDeps): Promise<SweepResult> {
   log.info(`scheduler sweep: ${due.length} due, ${closing.length} closing of ${candidates.length} open`);
   await notifyDueParties(deps, due);
   await notifyClosingParties(deps, closing);
-  return { checkedAt, due, closingSoon: closing.length };
+  const autoRelease = await attemptAutoReleases(deps, due);
+  return { checkedAt, due, closingSoon: closing.length, autoRelease };
+}
+
+async function attemptAutoReleases(deps: SweepDeps, due: DueRelease[]): Promise<AutoReleaseSummary> {
+  const summary: AutoReleaseSummary = { attempted: 0, succeeded: 0, failed: 0 };
+  if (deps.requestAutoRelease === undefined) return summary;
+  for (const item of due) {
+    summary.attempted += 1;
+    try {
+      const result = await deps.requestAutoRelease({
+        engagementId: item.engagementId,
+        milestoneIndex: item.milestoneIndex,
+        releaseAfter: item.releaseAfter,
+      });
+      if (result.ok) {
+        summary.succeeded += 1;
+      } else {
+        summary.failed += 1;
+        log.error(`autoRelease declined for ${item.engagementId}#${item.milestoneIndex}: ${result.error ?? "unknown"}`);
+      }
+    } catch {
+      summary.failed += 1;
+      log.error(`autoRelease threw for ${item.engagementId}#${item.milestoneIndex}`);
+    }
+  }
+  return summary;
 }
 
 async function notifyDueParties(deps: SweepDeps, due: DueRelease[]): Promise<void> {
