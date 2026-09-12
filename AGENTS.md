@@ -80,8 +80,8 @@ migrated once already (`verifyAuthToken` → `verifyAccessToken`, camelCase → 
 3. **Contracts:** nothing else. There is no `foundry.toml` — forge defaults apply. Do not add
    one unless requested.
 
-4. **DB:** apply `backend/supabase/migrations/0001_pact_core.sql` (the only migration — note
-   the path is `backend/supabase/`, not `./supabase/`) via `supabase db push` / `psql` /
+4. **DB:** apply `backend/supabase/migrations/*.sql` in order (note
+the path is `backend/supabase/`, not `./supabase/`) via `supabase db push` / `psql` /
    dashboard. Requires `pgcrypto`. Tables: `businesses`, `engagements` (status enum
    PROPOSED/ACTIVE/COMPLETED/DISPUTED/CANCELLED; `template_type` checked 1–6), `milestones`,
    `reputation_events`, `proposals` (ephemeral pre-signature link-flow table).
@@ -98,6 +98,7 @@ backend/
     config/env.ts        zod env schema + loadEnv() (envFlag() for booleans)
     config/supabase.ts   Supabase client
     chain/registry.ts    viem read-only Registry access (isBusinessActive; null when unconfigured)
+    chain/escrow.ts      viem read-only Escrow access (milestones released flag; null when unconfigured)
     middleware/http.ts   requestId + errorHandler
     middleware/privyAuth.ts  Identity + createRequireAuth (Bearer via @privy-io/node;
     dev-header privyAuthStub only when ALLOW_DEV_AUTH=true)
@@ -110,12 +111,33 @@ backend/
     routes/businesses.ts POST /api/businesses/register (World→dedupe→mirror row;
     caller sends registerBusiness tx themselves; ENS minting follows)
     routes/businesses.test.ts HTTP tests (memory store)
+    routes/proposals.ts  POST /api/proposals (authed, canonical hash) +
+    GET /api/proposals/:token (public link view, 410 past expiry) +
+    POST /api/proposals/:token/accept (counterparty creates engagement)
+    routes/engagements.ts POST /api/engagements (mirror intent row) +
+    POST /api/engagements/:id/milestones/:index/submit (completion notice,
+    starts 48h acceptance window) + .../release (mirror on-chain release,
+    chain-verified when configured; completes engagement on last release)
+    routes/disputes.ts   POST .../dispute (freeze + DISPUTED) + .../resolve
+    (co-signed split record; mutual match releases + reopens ACTIVE)
+    routes/scheduler.ts  POST /api/scheduler/sweep (due-release detection;
+    execution via session signer follows)
     repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
+    repos/proposals.ts   ProposalStore (ephemeral drafts, 14d TTL)
+    repos/engagements.ts EngagementStore + MilestoneStore (chain is authoritative)
+    repos/disputes.ts    DisputeVoteStore (co-sign quorum mirror)
+    ens/pact-terms.ts    Terms-V1 canonicalizer — MUST stay byte-identical to
+                         root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)
     services/world.ts    portal verify via fetch to v4/verify/{rp_id} + zod parsing
+    services/scheduler.ts ACCEPTANCE_WINDOW_HOURS + releaseAfter + findDueReleases (pure)
     types/express.d.ts   Request augmentation
-    repos/  ens/         repos has businesses.ts; ens/ still empty — check before adding duplicates
+    repos/ens/         repos has businesses.ts; ens/ has pact-terms.ts (more ports
+                         only after root scripts stabilize — never fork them)
   supabase/migrations/0001_pact_core.sql + 0002_business_session_unique.sql
+  + 0003_dispute_votes.sql + 0004_proposal_accepted.sql
+  src/lifecycle.test.ts  cross-router composition proof (register→propose→
+  accept→submit→release); update it when handoffs change
   oxlint.config.ts
   vitest.config.ts     scopes `npm test` to `src/**` (excludes submodule RuleTester files)
   tools/oxlint/anti-slop/    lint plugin (submodule; loaded by oxlint.config.ts)

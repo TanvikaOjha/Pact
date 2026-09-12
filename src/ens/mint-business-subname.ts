@@ -514,11 +514,17 @@ async function mintBusinessSubname(
 
   const version = 0n
 
+  // The resolver is Pact-managed because Pact writes the business
+  // reputation records during the application lifecycle.
+  // Include the normalized slug in the salt so every business gets a
+  // deterministic but distinct resolver proxy, even when multiple
+  // businesses share the same owner address.
   const resolverSalt = BigInt(
     keccak256(
       encodeAbiParameters(
         [
           { type: 'bytes32' },
+          { type: 'string' },
           { type: 'address' },
           { type: 'uint256' },
         ],
@@ -526,6 +532,7 @@ async function mintBusinessSubname(
           keccak256(
             stringToHex('OwnedResolver'),
           ),
+          slug.toLowerCase(),
           ownerAddress,
           version,
         ],
@@ -537,7 +544,7 @@ async function mintBusinessSubname(
     abi: resolverInitAbi,
     functionName: 'initialize',
     args: [
-      ownerAddress,
+      account.address,
       ALL_ROLES,
       [],
     ],
@@ -548,7 +555,12 @@ async function mintBusinessSubname(
   )
 
   console.log(
-    'Resolver owner:',
+    'Resolver admin:',
+    account.address,
+  )
+
+  console.log(
+    'Business owner:',
     ownerAddress,
   )
 

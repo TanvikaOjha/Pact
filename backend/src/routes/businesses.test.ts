@@ -13,6 +13,7 @@ const WALLET_C = "0xcccccccccccccccccccccccccccccccccccccccc";
 function createMemoryStore(): BusinessStore {
   const rows: BusinessRow[] = [];
   return {
+    findById: async (id: string) => rows.find((row) => row.id === id) ?? null,
     findByWallet: async (walletAddress: string) =>
       rows.find((row) => row.wallet_address === walletAddress) ?? null,
     findBySubname: async (ensSubname: string) =>
