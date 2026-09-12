@@ -8,10 +8,10 @@ import {
   CUSTOM_TEMPLATE,
   WORLD_THRESHOLD,
   DEFAULT_WINDOW_HOURS,
-} from "../../../lib/templates";
+} from "@/lib/templates";
 import { Engagement, Milestone, TemplateType } from "@/lib/types";
 import { formatUSDC, isoDaysFromNow, slugify } from "@/lib/utils";
-import TerminalBlock from "../../../components/TerminalBlock";
+import TerminalBlock from "@/components/TerminalBlock";
 
 type Stage = "form" | "preview";
 

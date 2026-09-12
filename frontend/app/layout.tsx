@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { Fraunces, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { StoreProvider } from "@/lib/store";
-import Nav from "../components/Nav";
-import Toasts from "../components/Toasts";
+import Nav from "@/components/Nav";
+import Toasts from "@/components/Toasts";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -37,8 +37,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${fraunces.variable} ${inter.variable} ${plexMono.variable} antialiased`}
-        style={{ fontFamily: "var(--font-inter), sans-serif"}}
+        className={`${fraunces.variable} ${inter.variable} ${plexMono.variable} font-sans text-ink grain`}
       >
         <StoreProvider>
           <Nav />
