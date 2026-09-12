@@ -137,6 +137,13 @@ function createStores() {
       }
       return row;
     },
+    setWorldSession: async (id: string, worldSessionId: string) => {
+      const row = milestones.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) row.world_session_id = worldSessionId;
+      return row;
+    },
+    findByWorldSession: async (worldSessionId: string) =>
+      milestones.find((row) => row.world_session_id === worldSessionId) ?? null,
   };
   const voteStore: DisputeVoteStore = {
     findMatchingCounterVote: async (
@@ -244,6 +251,8 @@ describe("disputes", () => {
         milestones: stores.milestoneStore,
         businesses: stores.businessStore,
         checkReleased: null,
+        highValueThreshold: 5000,
+        world: { devWorldStub: true, rpId: undefined, expectedAction: undefined },
         votes: stores.voteStore,
         reputation: { recordCompletion: async () => {}, eventsForBusiness: async () => [] },
         notify: notifier.notify,

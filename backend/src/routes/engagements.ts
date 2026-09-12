@@ -11,6 +11,7 @@ import type {
 } from "../repos/engagements.js";
 import type { ReputationStore } from "../repos/reputation.js";
 import { log } from "../services/log.js";
+import { jsonValueSchema, verifyWorldProof } from "../services/world.js";
 import {
   completionSubmittedEmail,
   milestoneReleasedEmail,
@@ -20,6 +21,7 @@ import {
 } from "../services/notifications.js";
 import { recordCompletionIfNeeded } from "../services/reputation.js";
 import { releaseAfter } from "../services/scheduler.js";
+import { devSessionId } from "./businesses.js";
 
 const milestoneInputSchema = z.object({
   index: z.number().int().min(0),
@@ -46,6 +48,13 @@ export interface EngagementsRouteOptions {
   votes: DisputeVoteStore;
   reputation: ReputationStore;
   notify: Notifier;
+  /** Milestones at or above this whole-USDC amount need a bound World session. */
+  highValueThreshold: number;
+  world: {
+    devWorldStub: boolean;
+    rpId: string | undefined;
+    expectedAction: string | undefined;
+  };
   /** Null when escrow reads are unavailable; recording proceeds (dev/offchain path). */
   checkReleased: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
@@ -78,6 +87,9 @@ export function createEngagementsRouter(options: EngagementsRouteOptions): Route
   });
   router.post("/engagements/:id/milestones/:index/release", (req: Request, res: Response, next: NextFunction) => {
     void handleRelease(req, res, options).catch(next);
+  });
+  router.post("/engagements/:id/milestones/:index/world-check", (req: Request, res: Response, next: NextFunction) => {
+    void handleWorldCheck(req, res, options).catch(next);
   });
   return router;
 }
@@ -263,6 +275,13 @@ async function handleRelease(
     res.status(409).json({ error: "not_submitted" });
     return;
   }
+  if (milestone.amount >= options.highValueThreshold && milestone.world_session_id === null) {
+    res.status(409).json({
+      error: "world_attestation_required",
+      threshold: options.highValueThreshold,
+    });
+    return;
+  }
   if (options.checkReleased !== null) {
     const released = await options.checkReleased(engagement.on_chain_id, index);
     if (released === false) {
@@ -288,4 +307,63 @@ async function handleRelease(
     milestoneReleasedEmail(engagement.ens_subname, milestone.name, index, milestone.amount),
   );
   res.json({ releasedAt, engagementCompleted });
+}
+
+const worldCheckRequestSchema = z.object({
+  /** Complete IDKit result, verified then bound to this engagement + milestone. */
+  proof: jsonValueSchema,
+});
+
+/**
+ * Bind a World Selfie Check session to one engagement milestone. The portal
+ * cannot bind proofs to our ids, so binding is server-side: a session id may
+ * back exactly one (engagement, milestone) pair, blocking literal replays.
+ * Required before release recording for milestones at/above the threshold.
+ */
+async function handleWorldCheck(
+  req: Request,
+  res: Response,
+  options: EngagementsRouteOptions,
+): Promise<void> {
+  const context = await loadMilestoneContext(req, res, options);
+  if (!context.ok) return;
+  const { engagement, milestone, index } = context;
+  if (milestone.released_at !== null) {
+    res.status(409).json({ error: "already_released" });
+    return;
+  }
+  const parsed = worldCheckRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "invalid_request" });
+    return;
+  }
+  let sessionId: string;
+  if (options.world.devWorldStub) {
+    sessionId = devSessionId();
+  } else {
+    if (options.world.rpId === undefined || options.world.rpId === "") {
+      res.status(503).json({ error: "world_unconfigured" });
+      return;
+    }
+    const result = await verifyWorldProof(parsed.data.proof, {
+      rpId: options.world.rpId,
+      expectedAction: options.world.expectedAction,
+    });
+    if (!result.pass || result.sessionId === null) {
+      res.status(422).json({ pass: false, code: result.code ?? "no_session" });
+      return;
+    }
+    sessionId = result.sessionId;
+  }
+  const existing = await options.milestones.findByWorldSession(sessionId);
+  if (
+    existing !== null &&
+    (existing.engagement_id !== engagement.id || existing.index !== index)
+  ) {
+    res.status(409).json({ error: "session_reused" });
+    return;
+  }
+  await options.milestones.setWorldSession(milestone.id, sessionId);
+  log.info(`world session bound: engagement ${engagement.id} milestone ${index}`);
+  res.json({ worldSessionId: sessionId });
 }

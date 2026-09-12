@@ -136,6 +136,8 @@ function createMemoryMilestoneStore(): MilestoneStore {
     markReleased: async () => null,
     setDisputed: async () => null,
     markResolved: async () => null,
+    setWorldSession: async () => null,
+    findByWorldSession: async () => null,
   };
 }
 

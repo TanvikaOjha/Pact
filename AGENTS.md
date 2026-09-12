@@ -117,7 +117,9 @@ backend/
     routes/engagements.ts POST /api/engagements (mirror intent row) +
     POST /api/engagements/:id/milestones/:index/submit (completion notice,
     starts 48h acceptance window) + .../release (mirror on-chain release,
-    chain-verified when configured; completes engagement on last release)
+    chain-verified when configured; high-value needs bound World session;
+    completes engagement on last release) +
+    POST .../world-check (bind selfie session to one milestone; anti-replay)
     routes/disputes.ts   POST .../dispute (freeze + DISPUTED) + .../resolve
     (co-signed split record; mutual match releases + reopens ACTIVE)
     routes/reputation.ts GET /businesses/:subname/reputation (public track
@@ -185,9 +187,10 @@ Contracts (run in `contracts/`): `forge build` · `forge test`
   `USDC_SEPOLIA_ADDRESS`, `PACT_REGISTRY_ADDRESS`, `PACT_ESCROW_ADDRESS`
 - **Defaults:** `PORT=4000`, `DEV_WORLD_STUB=true`, `ALLOW_DEV_AUTH=false` (dev-header
   auth is opt-in; never enable in prod), `ENS_ROOT_NAME=pact-hack.eth` (the root actually
-  registered on Sepolia — do NOT change to `pact.eth` until it exists on-chain). Flags parse
-  strict `"true"`/`"false"` via `envFlag()` — never use `z.coerce.boolean()` for flags
-  (`Boolean("false")` is true).
+  registered on Sepolia — do NOT change to `pact.eth` until it exists on-chain),
+  `WORLD_HIGH_VALUE_THRESHOLD=5000` (whole-USDC milestone amounts at/above this need a
+  bound World session before release recording). Flags parse strict `"true"`/`"false"` via
+  `envFlag()` — never use `z.coerce.boolean()` for flags (`Boolean("false")` is true).
 - `DATABASE_URL` appears in the example but is **not** in the zod schema — do not rely on it.
 
 Contract wiring: `USDC_SEPOLIA_ADDRESS` → `PactEscrow` constructor; `PACT_REGISTRY_ADDRESS` /

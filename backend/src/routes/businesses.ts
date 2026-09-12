@@ -26,7 +26,7 @@ export interface BusinessesRouteOptions {
   ensRoot: string;
 }
 
-function devSessionId(): string {
+export function devSessionId(): string {
   return `session_dev_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
 

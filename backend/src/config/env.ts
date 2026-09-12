@@ -36,6 +36,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   DEV_WORLD_STUB: envFlag(true),
   ALLOW_DEV_AUTH: envFlag(false),
+  // Milestone amounts are whole USDC dollars; at or above this, acceptance
+  // requires a bound World Selfie Check session (spec Q1 default $5,000).
+  WORLD_HIGH_VALUE_THRESHOLD: z.coerce.number().positive().default(5000),
 });
 
 export type Env = z.infer<typeof envSchema>;

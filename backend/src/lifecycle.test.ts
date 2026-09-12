@@ -150,6 +150,13 @@ function createStores() {
       }
       return row;
     },
+    setWorldSession: async (id: string, worldSessionId: string) => {
+      const row = milestones.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) row.world_session_id = worldSessionId;
+      return row;
+    },
+    findByWorldSession: async (worldSessionId: string) =>
+      milestones.find((row) => row.world_session_id === worldSessionId) ?? null,
   };
   return { businessStore, proposalStore, engagementStore, milestoneStore };
 }
@@ -232,6 +239,8 @@ describe("lifecycle: register, propose, accept, submit, release", () => {
         milestones: stores.milestoneStore,
         businesses: stores.businessStore,
         checkReleased: null,
+        highValueThreshold: 5000,
+        world: { devWorldStub: true, rpId: undefined, expectedAction: undefined },
         votes: {
           hasVotesForEngagement: async () => false,
           findMatchingCounterVote: async () => null,

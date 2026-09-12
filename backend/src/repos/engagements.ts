@@ -70,6 +70,8 @@ export interface MilestoneStore {
   markReleased(id: string, releasedAt: string): Promise<MilestoneRow | null>;
   setDisputed(id: string, disputed: boolean): Promise<MilestoneRow | null>;
   markResolved(id: string, releasedAt: string): Promise<MilestoneRow | null>;
+  setWorldSession(id: string, worldSessionId: string): Promise<MilestoneRow | null>;
+  findByWorldSession(worldSessionId: string): Promise<MilestoneRow | null>;
 }
 
 function firstRow<T>(rows: T[] | null): T | null {
@@ -224,6 +226,26 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
         .select()
         .returns<MilestoneRow[]>();
       if (result.error) throw new Error(`milestone update failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async setWorldSession(id: string, worldSessionId: string): Promise<MilestoneRow | null> {
+      const result = await client
+        .from("milestones")
+        .update({ world_session_id: worldSessionId })
+        .eq("id", id)
+        .select()
+        .returns<MilestoneRow[]>();
+      if (result.error) throw new Error(`milestone update failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async findByWorldSession(worldSessionId: string): Promise<MilestoneRow | null> {
+      const result = await client
+        .from("milestones")
+        .select("*")
+        .eq("world_session_id", worldSessionId)
+        .limit(1)
+        .returns<MilestoneRow[]>();
+      if (result.error) throw new Error(`milestone lookup failed: ${result.error.message}`);
       return firstRow(result.data);
     },
   };

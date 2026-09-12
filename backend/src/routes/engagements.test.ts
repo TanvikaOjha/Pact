@@ -137,6 +137,13 @@ function createMemoryMilestoneStore(): MilestoneStore {
       }
       return row;
     },
+    setWorldSession: async (id: string, worldSessionId: string) => {
+      const row = rows.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) row.world_session_id = worldSessionId;
+      return row;
+    },
+    findByWorldSession: async (worldSessionId: string) =>
+      rows.find((row) => row.world_session_id === worldSessionId) ?? null,
     listSubmittedUnreleased: async () =>
       rows.filter(
         (row) => row.submitted_at !== null && row.released_at === null && !row.disputed,
@@ -180,10 +187,19 @@ const MILESTONES = [
   { index: 1, name: "Build", description: "Site", amount: 3000, dueDate: "2026-11-01" },
 ];
 
+interface DraftMilestone {
+  index: number;
+  name: string;
+  description: string;
+  amount: number;
+  dueDate: string;
+}
+
 interface DraftOverrides {
   counterpartyWallet?: string;
   totalAmount?: number;
   onChainId?: string;
+  milestones?: DraftMilestone[];
 }
 
 function draft(overrides: DraftOverrides = {}): string {
@@ -198,6 +214,10 @@ function draft(overrides: DraftOverrides = {}): string {
     ...overrides,
   });
 }
+
+const WHALE_MILESTONES: DraftMilestone[] = [
+  { index: 0, name: "Whale", description: "Big delivery", amount: 6000, dueDate: "2026-12-01" },
+];
 
 describe("engagements", () => {
   let server: Server | null = null;
@@ -222,6 +242,8 @@ describe("engagements", () => {
         businesses: createMemoryBusinessStore(),
         // Null chain readers + recording sinks: dev paths record without on-chain proof.
         checkReleased: null,
+        highValueThreshold: 5000,
+        world: { devWorldStub: true, rpId: undefined, expectedAction: undefined },
         votes: {
           hasVotesForEngagement: async () => false,
           findMatchingCounterVote: async () => null,
@@ -352,5 +374,60 @@ describe("engagements", () => {
 
     const outsider = await api(port, "POST", `/api/engagements/${id}/milestones/1/release`, OUTSIDER);
     expect(outsider.status).toBe(403);
+  });
+
+  test("high-value release requires a bound world session", async () => {
+    const created = await api(
+      port,
+      "POST",
+      "/api/engagements",
+      WALLET_A,
+      draft({ onChainId: "0xeng-whale", totalAmount: 6000, milestones: WHALE_MILESTONES }),
+    );
+    expect(created.status).toBe(201);
+    const id = created.body.id ?? "";
+
+    const submit = await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+    expect(submit.status).toBe(200);
+
+    const blocked = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_A);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe("world_attestation_required");
+
+    const check = await api(
+      port,
+      "POST",
+      `/api/engagements/${id}/milestones/0/world-check`,
+      WALLET_A,
+      JSON.stringify({ proof: { responses: [] } }),
+    );
+    expect(check.status).toBe(200);
+
+    const released = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_A);
+    expect(released.status).toBe(200);
+    expect(released.body.engagementCompleted).toBe(true);
+  });
+
+  test("world-check is idempotent for the same milestone", async () => {
+    const created = await api(port, "POST", "/api/engagements", WALLET_A, draft({ onChainId: "0xeng-wc" }));
+    const id = created.body.id ?? "";
+
+    const first = await api(
+      port,
+      "POST",
+      `/api/engagements/${id}/milestones/0/world-check`,
+      WALLET_A,
+      JSON.stringify({ proof: { responses: [] } }),
+    );
+    expect(first.status).toBe(200);
+
+    const second = await api(
+      port,
+      "POST",
+      `/api/engagements/${id}/milestones/0/world-check`,
+      WALLET_A,
+      JSON.stringify({ proof: { responses: [] } }),
+    );
+    expect(second.status).toBe(200);
   });
 });

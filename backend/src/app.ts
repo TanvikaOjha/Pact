@@ -80,6 +80,12 @@ export function createApp() {
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
       notify,
+      highValueThreshold: env.WORLD_HIGH_VALUE_THRESHOLD,
+      world: {
+        devWorldStub: env.DEV_WORLD_STUB,
+        rpId: env.WORLD_APP_ID,
+        expectedAction: env.WORLD_ACTION_ID,
+      },
       checkReleased:
         escrowReader === null
           ? null

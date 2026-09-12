@@ -133,6 +133,13 @@ function createStores() {
       }
       return row;
     },
+    setWorldSession: async (id: string, worldSessionId: string) => {
+      const row = milestones.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) row.world_session_id = worldSessionId;
+      return row;
+    },
+    findByWorldSession: async (worldSessionId: string) =>
+      milestones.find((row) => row.world_session_id === worldSessionId) ?? null,
   };
   const voteStore: DisputeVoteStore = {
     findMatchingCounterVote: async (
@@ -259,6 +266,8 @@ describe("reputation", () => {
         votes: stores.voteStore,
         reputation: stores.reputationStore,
         checkReleased: null,
+        highValueThreshold: 5000,
+        world: { devWorldStub: true, rpId: undefined, expectedAction: undefined },
         notify: { send: async () => {} },
       }),
     );

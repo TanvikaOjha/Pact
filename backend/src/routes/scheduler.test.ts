@@ -92,6 +92,8 @@ describe("POST /api/scheduler/sweep", () => {
       markReleased: async () => null,
       setDisputed: async () => null,
       markResolved: async () => null,
+    setWorldSession: async () => null,
+    findByWorldSession: async () => null,
     };
     const app = express();
     app.use(express.json());
