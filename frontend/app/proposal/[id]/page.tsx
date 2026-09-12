@@ -44,7 +44,14 @@ export default function ProposalPage() {
   }, [api, token]);
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    void (async () => {
+      if (cancelled) return;
+      await load();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   if (error) {

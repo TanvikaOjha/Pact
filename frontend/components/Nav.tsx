@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadSubnameFor } from "@/lib/utils";
 import Seal from "./Seal";
@@ -11,11 +10,7 @@ import { truncateMid } from "@/lib/utils";
 export default function Nav() {
   const { walletAddress, ready, signOut } = useAuth();
   const pathname = usePathname();
-  const [subname, setSubname] = useState<string | null>(null);
-
-  useEffect(() => {
-    setSubname(walletAddress ? loadSubnameFor(walletAddress) : null);
-  }, [walletAddress, pathname]);
+  const subname = walletAddress ? loadSubnameFor(walletAddress) : null;
 
   const links = [
     { href: "/templates", label: "Engagements" },

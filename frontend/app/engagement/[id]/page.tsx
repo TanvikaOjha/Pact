@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth";
@@ -28,27 +28,20 @@ export default function EngagementPage() {
   const router = useRouter();
   const { api, walletAddress } = useAuth();
   const { pushToast } = useToast();
-  const [engagement, setEngagement] = useState<LocalEngagement | null>(null);
-  const [viewAs, setViewAs] = useState<"provider" | "counterparty">("provider");
+  const [engagement, setEngagement] = useState<LocalEngagement | null>(() => loadEngagement(id));
+  const [viewAsOverride, setViewAsOverride] = useState<"provider" | "counterparty" | null>(null);
+  const viewAs =
+    viewAsOverride ??
+    (engagement !== null &&
+    walletAddress !== null &&
+    walletAddress.toLowerCase() !== engagement.proposerWallet.toLowerCase()
+      ? "counterparty"
+      : "provider");
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [pendingWorldCheck, setPendingWorldCheck] = useState<number | null>(null);
   const [evidence, setEvidence] = useState<Record<number, string>>({});
   const [resolving, setResolving] = useState<number | null>(null);
   const [split, setSplit] = useState({ providerAmount: 0, clientRefund: 0 });
-
-  useEffect(() => {
-    setEngagement(loadEngagement(id));
-  }, [id]);
-
-  useEffect(() => {
-    if (engagement && walletAddress) {
-      setViewAs(
-        walletAddress.toLowerCase() === engagement.proposerWallet.toLowerCase()
-          ? "provider"
-          : "counterparty",
-      );
-    }
-  }, [engagement, walletAddress]);
 
   if (!engagement) {
     return (
@@ -271,7 +264,7 @@ export default function EngagementPage() {
         {(["provider", "counterparty"] as const).map((side) => (
           <button
             key={side}
-            onClick={() => setViewAs(side)}
+            onClick={() => setViewAsOverride(side)}
             className={`text-xs px-3 py-1.5 rounded border capitalize ${
               viewAs === side
                 ? "border-accent text-accent"

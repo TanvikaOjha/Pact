@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth";
-import { loadEngagements, type LocalEngagement } from "@/lib/utils";
+import { loadEngagements } from "@/lib/utils";
 import { TEMPLATES, CUSTOM_TEMPLATE } from "@/lib/templates";
 import TemplateIcon from "@/components/TemplateIcon";
 import RevealOnScroll from "@/components/RevealOnScroll";
@@ -13,19 +13,16 @@ import RevealOnScroll from "@/components/RevealOnScroll";
 export default function TemplatePicker() {
   const { walletAddress, ready } = useAuth();
   const router = useRouter();
-  const [engagements, setEngagements] = useState<LocalEngagement[]>([]);
+  const engagements = useMemo(() => {
+    if (!walletAddress) return [];
+    return Object.values(loadEngagements())
+      .filter((e) => e.proposerWallet.toLowerCase() === walletAddress.toLowerCase())
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  }, [walletAddress]);
 
   useEffect(() => {
     if (ready && !walletAddress) router.replace("/identity");
   }, [ready, walletAddress, router]);
-
-  useEffect(() => {
-    if (!walletAddress) return;
-    const mine = Object.values(loadEngagements())
-      .filter((e) => e.proposerWallet.toLowerCase() === walletAddress.toLowerCase())
-      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-    setEngagements(mine);
-  }, [walletAddress]);
 
   if (!ready || !walletAddress) return null;
 
