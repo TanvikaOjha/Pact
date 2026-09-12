@@ -44,6 +44,21 @@ contract PactEscrowTest is Test {
         registry.signEngagement(id);
     }
 
+    function _defaultTerms(uint256 n) internal pure returns (PactEscrow.MilestoneTerms[] memory terms) {
+        terms = new PactEscrow.MilestoneTerms[](n);
+        for (uint256 i = 0; i < n; i++) {
+            terms[i] = PactEscrow.MilestoneTerms({
+                deadline: 0,
+                graceSeconds: 1 hours,
+                evidenceRequired: false,
+                acceptanceWindowSeconds: 2 days,
+                defaultProviderBps: 5000,
+                challengeWindowSeconds: 7 days,
+                visibility: 0
+            });
+        }
+    }
+
     // ── Funding ─────────────────────────────────────────────────────────────
 
     function test_fundEngagement_movesUsdcAndStoresMilestones() public {
@@ -53,7 +68,7 @@ contract PactEscrowTest is Test {
         amounts[0] = 2_000e6;
 
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 2 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         assertEq(usdc.balanceOf(address(escrow)), 2_000e6);
         PactEscrow.EscrowInfo memory info = escrow.getEscrowInfo(id);
@@ -71,7 +86,7 @@ contract PactEscrowTest is Test {
 
         vm.prank(client);
         vm.expectRevert(PactEscrow.AmountsMismatch.selector);
-        escrow.fundEngagement(id, amounts, 2 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
     }
 
     // ── Direct release (FilePizza mechanic: no backend in the call path) ──────
@@ -82,10 +97,10 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 2_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 2 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
 
         // This call comes straight from the client's wallet — no Pact backend involved.
         vm.expectEmit(true, true, true, true);
@@ -103,7 +118,7 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 1 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         vm.prank(client);
         vm.expectRevert(PactEscrow.MilestoneNotSubmitted.selector);
@@ -116,10 +131,10 @@ contract PactEscrowTest is Test {
         amounts[0] = 2_000e6;
         amounts[1] = 3_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 1 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(2));
 
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
         vm.prank(client);
         escrow.releaseMilestone(id, 0); // first milestone — should NOT emit PactCompleted
 
@@ -127,7 +142,7 @@ contract PactEscrowTest is Test {
         assertEq(uint8(registry.getEngagement(id).status), uint8(PactRegistry.EngagementStatus.ACTIVE));
 
         vm.prank(provider);
-        escrow.submitCompletion(id, 1);
+        escrow.submitCompletion(id, 1, bytes32(0));
         vm.prank(client);
         escrow.releaseMilestone(id, 1); // second milestone — completes the engagement
 
@@ -142,10 +157,10 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1_500e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 2 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
 
         vm.expectRevert(PactEscrow.WindowNotClosed.selector);
         vm.prank(keeper);
@@ -166,10 +181,10 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 10_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 2 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
 
         vm.prank(client);
         vm.expectRevert(PactEscrow.WorldVerificationRequired.selector);
@@ -200,10 +215,10 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1_000_000;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 1 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         vm.prank(provider); // provider field is unused for split but submitCompletion still gated on it
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
 
         vm.prank(client);
         escrow.splitRelease(id, providerA, 3333, providerB); // 33.33% / 66.67%
@@ -220,9 +235,9 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 1 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
 
         vm.prank(client);
         vm.expectRevert(PactEscrow.BadShare.selector);
@@ -236,10 +251,10 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 2 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
 
         vm.prank(client);
         escrow.raiseDispute(id, 0);
@@ -265,10 +280,10 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 2 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
 
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
 
         vm.prank(client);
         escrow.raiseDispute(id, 0);
@@ -288,14 +303,231 @@ contract PactEscrowTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1_000e6;
         vm.prank(client);
-        escrow.fundEngagement(id, amounts, 1 days);
+        escrow.fundEngagement(id, amounts, _defaultTerms(1));
         vm.prank(provider);
-        escrow.submitCompletion(id, 0);
+        escrow.submitCompletion(id, 0, bytes32(0));
         vm.prank(client);
         escrow.releaseMilestone(id, 0);
 
         vm.prank(client);
         vm.expectRevert(PactEscrow.MilestoneAlreadyReleased.selector);
         escrow.raiseDispute(id, 0);
+    }
+
+    // ── M4 executable terms ─────────────────────────────────────────────────
+
+    function test_termsCommitted_storedAndEmitted() public {
+        bytes32 id = _activeEngagement(2_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 2_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = new PactEscrow.MilestoneTerms[](1);
+        terms[0] = PactEscrow.MilestoneTerms({
+            deadline: block.timestamp + 7 days,
+            graceSeconds: 1 hours,
+            evidenceRequired: false,
+            acceptanceWindowSeconds: 2 days,
+            defaultProviderBps: 5000,
+            challengeWindowSeconds: 7 days,
+            visibility: 0
+        });
+
+        vm.expectEmit(true, false, false, true);
+        emit PactEscrow.TermsCommitted(id, 0);
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        PactEscrow.MilestoneTerms memory stored = escrow.getMilestoneTerms(id, 0);
+        assertEq(stored.deadline, block.timestamp + 7 days);
+        assertEq(stored.graceSeconds, 1 hours);
+        assertFalse(stored.evidenceRequired);
+        assertEq(stored.acceptanceWindowSeconds, 2 days);
+        assertEq(stored.defaultProviderBps, 5000);
+        assertEq(stored.challengeWindowSeconds, 7 days);
+        assertEq(stored.visibility, 0);
+    }
+
+    function test_fundEngagement_revertsOnTermsMismatch() public {
+        bytes32 id = _activeEngagement(2_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 2_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(2); // length 2 vs amounts length 1
+
+        vm.prank(client);
+        vm.expectRevert(PactEscrow.TermsMismatch.selector);
+        escrow.fundEngagement(id, amounts, terms);
+    }
+
+    function test_fundEngagement_revertsOnBadVisibility() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].visibility = 2; // sealed is v2.1
+
+        vm.prank(client);
+        vm.expectRevert(PactEscrow.BadVisibility.selector);
+        escrow.fundEngagement(id, amounts, terms);
+    }
+
+    function test_fundEngagement_revertsOnBadDefaultShare() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].defaultProviderBps = 10001;
+
+        vm.prank(client);
+        vm.expectRevert(PactEscrow.BadShare.selector);
+        escrow.fundEngagement(id, amounts, terms);
+    }
+
+    function test_submitCompletion_revertsWhenEvidenceRequired() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].evidenceRequired = true;
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        vm.prank(provider);
+        vm.expectRevert(PactEscrow.EvidenceRequired.selector);
+        escrow.submitCompletion(id, 0, bytes32(0));
+    }
+
+    function test_submitCompletion_storesEvidenceHash() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].evidenceRequired = true;
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        bytes32 evidence = keccak256("deliverable-cid");
+        vm.prank(provider);
+        escrow.submitCompletion(id, 0, evidence);
+
+        PactEscrow.Milestone memory m = escrow.getMilestone(id, 0);
+        assertEq(m.evidenceHash, evidence);
+    }
+
+    function test_submitCompletion_marksLateWhenPastDeadlinePlusGrace() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        uint256 deadline = block.timestamp + 1 days;
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].deadline = deadline;
+        terms[0].graceSeconds = 1 hours;
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        vm.warp(deadline + 1 hours + 1); // past deadline + grace
+
+        vm.prank(provider);
+        escrow.submitCompletion(id, 0, bytes32(0));
+
+        PactEscrow.Milestone memory m = escrow.getMilestone(id, 0);
+        assertTrue(m.late);
+    }
+
+    function test_submitCompletion_notLateWhenOnTime() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].deadline = block.timestamp + 7 days;
+        terms[0].graceSeconds = 1 hours;
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        vm.prank(provider);
+        escrow.submitCompletion(id, 0, bytes32(0));
+
+        PactEscrow.Milestone memory m = escrow.getMilestone(id, 0);
+        assertFalse(m.late);
+    }
+
+    function test_submitCompletion_notLateWhenNoDeadline() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].deadline = 0;
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        vm.warp(block.timestamp + 365 days); // far future still not late without a deadline
+
+        vm.prank(provider);
+        escrow.submitCompletion(id, 0, bytes32(0));
+
+        PactEscrow.Milestone memory m = escrow.getMilestone(id, 0);
+        assertFalse(m.late);
+    }
+
+    function test_releaseAfter_honorsPerMilestoneWindow() public {
+        bytes32 id = _activeEngagement(5_000e6, 2);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 2_000e6;
+        amounts[1] = 3_000e6;
+
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(2);
+        terms[0].acceptanceWindowSeconds = 1 days;
+        terms[1].acceptanceWindowSeconds = 3 days;
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        uint256 submitTime = block.timestamp;
+        vm.prank(provider);
+        escrow.submitCompletion(id, 0, bytes32(0));
+        vm.prank(provider);
+        escrow.submitCompletion(id, 1, bytes32(0));
+
+        PactEscrow.Milestone memory m0 = escrow.getMilestone(id, 0);
+        PactEscrow.Milestone memory m1 = escrow.getMilestone(id, 1);
+        assertEq(m0.releaseAfter, submitTime + 1 days);
+        assertEq(m1.releaseAfter, submitTime + 3 days);
+    }
+
+    function test_pactCompleted_onTimeFalseWhenLateWithNoDispute() public {
+        bytes32 id = _activeEngagement(1_000e6, 1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1_000e6;
+
+        uint256 deadline = block.timestamp + 1 days;
+        PactEscrow.MilestoneTerms[] memory terms = _defaultTerms(1);
+        terms[0].deadline = deadline;
+        terms[0].graceSeconds = 1 hours;
+
+        vm.prank(client);
+        escrow.fundEngagement(id, amounts, terms);
+
+        vm.warp(deadline + 1 hours + 1);
+        vm.prank(provider);
+        escrow.submitCompletion(id, 0, bytes32(0));
+
+        vm.expectEmit(true, true, true, true);
+        emit PactEscrow.PactCompleted(id, client, "client.pact.eth", provider, "provider.pact.eth", 1, 1_000e6, false, false);
+
+        vm.prank(client);
+        escrow.releaseMilestone(id, 0);
     }
 }

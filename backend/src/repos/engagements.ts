@@ -14,6 +14,10 @@ export interface EngagementRow {
   status: EngagementStatus;
   created_at: string;
   completed_at: string | null;
+  /** Optional: absent on rows written before migration 0007. */
+  visibility?: string | null;
+  default_provider_bps?: number | null;
+  challenge_window_seconds?: number | null;
 }
 
 export interface NewEngagement {
@@ -24,6 +28,9 @@ export interface NewEngagement {
   templateType: number;
   termsHash: string;
   totalAmount: number;
+  visibility?: string;
+  defaultProviderBps?: number | null;
+  challengeWindowSeconds?: number | null;
 }
 
 export interface EngagementStore {
@@ -36,6 +43,12 @@ export interface EngagementStore {
 export interface EngagementStatusPatch {
   status: EngagementStatus;
   completed_at?: string;
+}
+
+interface MilestoneSubmitPatch {
+  submitted_at: string;
+  evidence_hash?: string | null;
+  late?: boolean;
 }
 
 export interface MilestoneRow {
@@ -52,6 +65,9 @@ export interface MilestoneRow {
   world_session_id: string | null;
   /** Optional: absent on rows written before migration 0006. */
   disputed_at?: string | null;
+  /** Optional: absent on rows written before migration 0007. */
+  evidence_hash?: string | null;
+  late?: boolean;
 }
 
 export interface NewMilestone {
@@ -69,7 +85,12 @@ export interface MilestoneStore {
   listDisputed(): Promise<MilestoneRow[]>;
   findByIndex(engagementId: string, index: number): Promise<MilestoneRow | null>;
   insertMany(milestones: NewMilestone[]): Promise<MilestoneRow[]>;
-  markSubmitted(id: string, submittedAt: string): Promise<MilestoneRow | null>;
+  markSubmitted(
+    id: string,
+    submittedAt: string,
+    evidenceHash?: string | null,
+    late?: boolean,
+  ): Promise<MilestoneRow | null>;
   markReleased(id: string, releasedAt: string): Promise<MilestoneRow | null>;
   setDisputed(id: string, disputed: boolean): Promise<MilestoneRow | null>;
   markResolved(id: string, releasedAt: string): Promise<MilestoneRow | null>;
@@ -113,6 +134,9 @@ export function createSupabaseEngagementStore(client: SupabaseClient): Engagemen
           terms_hash: engagement.termsHash,
           total_amount: engagement.totalAmount,
           status: "PROPOSED",
+          visibility: engagement.visibility ?? "public",
+          default_provider_bps: engagement.defaultProviderBps ?? null,
+          challenge_window_seconds: engagement.challengeWindowSeconds ?? null,
         })
         .select()
         .returns<EngagementRow[]>();
@@ -201,10 +225,18 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
       if (result.error) throw new Error(`milestone insert failed: ${result.error.message}`);
       return result.data ?? [];
     },
-    async markSubmitted(id: string, submittedAt: string): Promise<MilestoneRow | null> {
+    async markSubmitted(
+      id: string,
+      submittedAt: string,
+      evidenceHash?: string | null,
+      late?: boolean,
+    ): Promise<MilestoneRow | null> {
+      const patch: MilestoneSubmitPatch = { submitted_at: submittedAt };
+      if (evidenceHash !== undefined) patch.evidence_hash = evidenceHash;
+      if (late !== undefined) patch.late = late;
       const result = await client
         .from("milestones")
-        .update({ submitted_at: submittedAt })
+        .update(patch)
         .eq("id", id)
         .select()
         .returns<MilestoneRow[]>();

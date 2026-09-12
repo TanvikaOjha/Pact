@@ -83,6 +83,9 @@ function createMemoryEngagementStore(): EngagementStore {
         status: "PROPOSED",
         created_at: new Date().toISOString(),
         completed_at: null,
+        visibility: engagement.visibility ?? "public",
+        default_provider_bps: engagement.defaultProviderBps ?? null,
+        challenge_window_seconds: engagement.challengeWindowSeconds ?? null,
       };
       rows.push(row);
       return row;
@@ -115,13 +118,24 @@ function createMemoryMilestoneStore(): MilestoneStore {
         released_at: null,
         disputed: false,
         world_session_id: null,
+        evidence_hash: null,
+        late: false,
       }));
       rows.push(...created);
       return created;
     },
-    markSubmitted: async (id: string, submittedAt: string) => {
+    markSubmitted: async (
+      id: string,
+      submittedAt: string,
+      evidenceHash?: string | null,
+      late?: boolean,
+    ) => {
       const row = rows.find((candidate) => candidate.id === id) ?? null;
-      if (row !== null) row.submitted_at = submittedAt;
+      if (row !== null) {
+        row.submitted_at = submittedAt;
+        if (evidenceHash !== undefined) row.evidence_hash = evidenceHash;
+        if (late !== undefined) row.late = late;
+      }
       return row;
     },
     setDisputed: async (id: string, disputed: boolean) => {
@@ -170,6 +184,8 @@ interface EngagementEnvelope {
   releaseAfter?: string;
   releasedAt?: string;
   engagementCompleted?: boolean;
+  evidenceHash?: string | null;
+  late?: boolean;
 }
 
 async function api(
@@ -205,6 +221,9 @@ interface DraftOverrides {
   totalAmount?: number;
   onChainId?: string;
   milestones?: DraftMilestone[];
+  visibility?: string;
+  defaultProviderBps?: number | null;
+  challengeWindowSeconds?: number | null;
 }
 
 function draft(overrides: DraftOverrides = {}): string {
@@ -411,6 +430,77 @@ describe("engagements", () => {
     const released = await api(port, "POST", `/api/engagements/${id}/milestones/0/release`, WALLET_A);
     expect(released.status).toBe(200);
     expect(released.body.engagementCompleted).toBe(true);
+  });
+
+  test("submit stores evidence hash and echoes it with the late flag", async () => {
+    const created = await api(port, "POST", "/api/engagements", WALLET_A, draft({ onChainId: "0xeng-ev" }));
+    const id = created.body.id ?? "";
+    const good = `0x${"ab".repeat(32)}`;
+
+    const first = await api(
+      port,
+      "POST",
+      `/api/engagements/${id}/milestones/0/submit`,
+      WALLET_A,
+      JSON.stringify({ evidenceHash: good }),
+    );
+    expect(first.status).toBe(200);
+    expect(first.body.evidenceHash).toBe(good);
+    expect(first.body.late).toBe(false);
+
+    const bad = await api(
+      port,
+      "POST",
+      `/api/engagements/${id}/milestones/1/submit`,
+      WALLET_A,
+      JSON.stringify({ evidenceHash: "nope" }),
+    );
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toBe("invalid_request");
+  });
+
+  test("submit marks past-due milestones late", async () => {
+    const created = await api(
+      port,
+      "POST",
+      "/api/engagements",
+      WALLET_A,
+      draft({
+        onChainId: "0xeng-late",
+        totalAmount: 100,
+        milestones: [{ index: 0, name: "Old", description: "Past due", amount: 100, dueDate: "2020-01-01" }],
+      }),
+    );
+    const id = created.body.id ?? "";
+    const res = await api(port, "POST", `/api/engagements/${id}/milestones/0/submit`, WALLET_A);
+    expect(res.status).toBe(200);
+    expect(res.body.late).toBe(true);
+    expect(res.body.evidenceHash).toBeNull();
+  });
+
+  test("create persists visibility and rejects unknown modes", async () => {
+    const created = await api(
+      port,
+      "POST",
+      "/api/engagements",
+      WALLET_A,
+      draft({
+        onChainId: "0xeng-vis",
+        visibility: "commit",
+        defaultProviderBps: 5000,
+        challengeWindowSeconds: 604800,
+      }),
+    );
+    expect(created.status).toBe(201);
+
+    const bad = await api(
+      port,
+      "POST",
+      "/api/engagements",
+      WALLET_A,
+      draft({ onChainId: "0xeng-vis2", visibility: "sealed" }),
+    );
+    expect(bad.status).toBe(400);
   });
 
   test("world-check is idempotent for the same milestone", async () => {

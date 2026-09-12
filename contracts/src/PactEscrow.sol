@@ -20,11 +20,22 @@ contract PactEscrow {
         address client;          // payer — funds the escrow
         address provider;        // payee — receives milestone releases
         uint256 totalAmount;     // sum of all milestone amounts, USDC 6 decimals
-        uint256 acceptanceWindow;// seconds; window after submitCompletion before autoRelease is allowed
         uint8 milestoneCount;
         bool funded;
         bool everDisputed;       // sticky flag for the reputation record — true if ANY milestone was ever disputed
         bool completedEmitted;   // guards against emitting PactCompleted twice
+    }
+
+    /// @notice M4 executable terms committed per milestone at funding.
+    /// Kernel scope only: no auto-discount, no arbiters, no streaming/chaining/sealed.
+    struct MilestoneTerms {
+        uint256 deadline;               // unix time; 0 = no deadline
+        uint256 graceSeconds;           // lateness grace before the late flag sets
+        bool evidenceRequired;          // submitCompletion must carry evidenceHash
+        uint256 acceptanceWindowSeconds;
+        uint16 defaultProviderBps;      // fallback split on challenge (5000 = 50/50)
+        uint256 challengeWindowSeconds;
+        uint8 visibility;               // 0 = public, 1 = commit (2 = sealed is v2.1)
     }
 
     struct Milestone {
@@ -34,6 +45,8 @@ contract PactEscrow {
         uint256 releaseAfter;    // timestamp after which autoRelease is allowed
         bool released;
         bool disputed;           // true while an active dispute is open on this milestone
+        bytes32 evidenceHash;    // M4: content fingerprint committed at submitCompletion
+        bool late;               // M4: true if submitted past deadline + grace
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -51,6 +64,7 @@ contract PactEscrow {
 
     mapping(bytes32 => EscrowInfo) public escrows;
     mapping(bytes32 => mapping(uint256 => Milestone)) public milestones;
+    mapping(bytes32 => mapping(uint256 => MilestoneTerms)) public milestoneTerms;
     mapping(bytes32 => mapping(uint256 => bool)) public worldAttested;
 
     /// @dev dispute co-signature bookkeeping: engagementId => milestoneIndex => party => proposal hash
@@ -61,7 +75,8 @@ contract PactEscrow {
     // ─────────────────────────────────────────────────────────────────────────
 
     event EngagementFunded(bytes32 indexed engagementId, address indexed client, address indexed provider, uint256 totalAmount, uint256 milestoneCount);
-    event MilestoneSubmitted(bytes32 indexed engagementId, uint256 milestoneIndex, uint256 releaseAfter);
+    event TermsCommitted(bytes32 indexed engagementId, uint256 milestoneIndex);
+    event MilestoneSubmitted(bytes32 indexed engagementId, uint256 milestoneIndex, uint256 releaseAfter, bytes32 evidenceHash, bool late);
     event MilestoneReleased(bytes32 indexed engagementId, uint256 milestoneIndex, uint256 amount);
     event MilestoneDisputed(bytes32 indexed engagementId, uint256 milestoneIndex);
     event DisputeResolved(bytes32 indexed engagementId, uint256 milestoneIndex, uint256 providerAmount, uint256 clientRefund);
@@ -104,6 +119,9 @@ contract PactEscrow {
     error NotWorldVerifier();
     error OnlyAdmin();
     error BadShare();
+    error TermsMismatch();
+    error BadVisibility();
+    error EvidenceRequired();
     error TransferFailed();
     error ZeroAddress();
 
@@ -150,15 +168,22 @@ contract PactEscrow {
     /// Delivery template passes a single-element array; Milestone/T&M/Recurring
     /// pass one element per period/phase; Split Delivery passes a single element
     /// representing the whole engagement (released via splitRelease, not releaseMilestone).
+    /// @param terms M4 executable terms per milestone (must match milestoneAmounts length).
     function fundEngagement(
         bytes32 engagementId,
         uint256[] calldata milestoneAmounts,
-        uint256 acceptanceWindowSeconds
+        MilestoneTerms[] calldata terms
     ) external {
         PactRegistry.Engagement memory e = registry.getEngagement(engagementId);
         if (e.status != PactRegistry.EngagementStatus.ACTIVE) revert NotActive();
         if (escrows[engagementId].funded) revert AlreadyFunded();
         if (msg.sender != e.partyA && msg.sender != e.partyB) revert NotAParty();
+        if (terms.length != milestoneAmounts.length) revert TermsMismatch();
+
+        for (uint256 i = 0; i < terms.length; i++) {
+            if (terms[i].defaultProviderBps > 10_000) revert BadShare();
+            if (terms[i].visibility > 1) revert BadVisibility();
+        }
 
         uint256 sum;
         for (uint256 i = 0; i < milestoneAmounts.length; i++) {
@@ -172,7 +197,6 @@ contract PactEscrow {
             client: msg.sender,
             provider: provider,
             totalAmount: e.totalAmount,
-            acceptanceWindow: acceptanceWindowSeconds,
             milestoneCount: uint8(milestoneAmounts.length),
             funded: true,
             everDisputed: false,
@@ -186,8 +210,12 @@ contract PactEscrow {
                 submittedAt: 0,
                 releaseAfter: 0,
                 released: false,
-                disputed: false
+                disputed: false,
+                evidenceHash: bytes32(0),
+                late: false
             });
+            milestoneTerms[engagementId][i] = terms[i];
+            emit TermsCommitted(engagementId, i);
         }
 
         bool ok = usdc.transferFrom(msg.sender, address(this), e.totalAmount);
@@ -200,8 +228,9 @@ contract PactEscrow {
     // Completion / acceptance
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// @notice Provider marks a milestone complete. Starts the acceptance window.
-    function submitCompletion(bytes32 engagementId, uint256 milestoneIndex) external {
+    /// @notice Provider marks a milestone complete. Starts the per-milestone
+    /// acceptance window committed at funding.
+    function submitCompletion(bytes32 engagementId, uint256 milestoneIndex, bytes32 evidenceHash) external {
         EscrowInfo storage info = escrows[engagementId];
         if (!info.funded) revert NotFunded();
         if (msg.sender != info.provider) revert NotProvider();
@@ -210,11 +239,19 @@ contract PactEscrow {
         if (m.submitted) revert MilestoneAlreadySubmitted();
         if (m.disputed) revert MilestoneDisputedErr();
 
+        MilestoneTerms storage t = milestoneTerms[engagementId][milestoneIndex];
+        if (t.evidenceRequired && evidenceHash == bytes32(0)) revert EvidenceRequired();
+
+        m.evidenceHash = evidenceHash;
+        if (t.deadline != 0 && block.timestamp > t.deadline + t.graceSeconds) {
+            m.late = true;
+        }
+
         m.submitted = true;
         m.submittedAt = block.timestamp;
-        m.releaseAfter = block.timestamp + info.acceptanceWindow;
+        m.releaseAfter = block.timestamp + t.acceptanceWindowSeconds;
 
-        emit MilestoneSubmitted(engagementId, milestoneIndex, m.releaseAfter);
+        emit MilestoneSubmitted(engagementId, milestoneIndex, m.releaseAfter, evidenceHash, m.late);
     }
 
     /// @notice The client (accepting party) calls this directly — no Pact backend
@@ -396,10 +433,17 @@ contract PactEscrow {
         PactRegistry.Business memory bizA = registry.getBusiness(e.partyA);
         PactRegistry.Business memory bizB = registry.getBusiness(e.partyB);
 
-        // MVP on-time definition: no dispute was ever raised on this engagement.
-        // (A stricter version would also compare each milestone's submittedAt/releasedAt
-        // against its own due date, once due dates are threaded through from ENS.)
+        // M4 on-time definition: no dispute ever raised AND no milestone submitted late
+        // (late = submitted past deadline + grace, flagged at submitCompletion).
         bool onTime = !info.everDisputed;
+        if (onTime) {
+            for (uint256 i = 0; i < info.milestoneCount; i++) {
+                if (milestones[engagementId][i].late) {
+                    onTime = false;
+                    break;
+                }
+            }
+        }
 
         emit PactCompleted(
             engagementId,
@@ -422,6 +466,10 @@ contract PactEscrow {
 
     function getMilestone(bytes32 engagementId, uint256 milestoneIndex) external view returns (Milestone memory) {
         return milestones[engagementId][milestoneIndex];
+    }
+
+    function getMilestoneTerms(bytes32 engagementId, uint256 milestoneIndex) external view returns (MilestoneTerms memory) {
+        return milestoneTerms[engagementId][milestoneIndex];
     }
 
     function getEscrowInfo(bytes32 engagementId) external view returns (EscrowInfo memory) {
