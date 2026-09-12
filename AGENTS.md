@@ -111,10 +111,13 @@ backend/
     caller sends registerBusiness tx themselves; ENS minting follows)
     routes/businesses.test.ts HTTP tests (memory store)
     repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
+    ens/pact-terms.ts    Terms-V1 canonicalizer — MUST stay byte-identical to
+                         root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)
     services/world.ts    portal verify via fetch to v4/verify/{rp_id} + zod parsing
     types/express.d.ts   Request augmentation
-    repos/  ens/         repos has businesses.ts; ens/ still empty — check before adding duplicates
+    repos/ens/         repos has businesses.ts; ens/ has pact-terms.ts (more ports
+                         only after root scripts stabilize — never fork them)
   supabase/migrations/0001_pact_core.sql + 0002_business_session_unique.sql
   oxlint.config.ts
   vitest.config.ts     scopes `npm test` to `src/**` (excludes submodule RuleTester files)
