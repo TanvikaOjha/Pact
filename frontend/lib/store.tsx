@@ -33,7 +33,7 @@ function seedCounterpartyHistory(slug: string): {
   const business: Business = {
     id,
     slug,
-    ensSubname: `${slug}.pact.eth`,
+    ensSubname: `${slug}.pact-hack.eth`,
     walletAddress: mockAddress(),
     worldVerified: true,
     worldSessionId: "wsid_" + shortId(10),
@@ -50,7 +50,7 @@ function seedCounterpartyHistory(slug: string): {
   const events: ReputationEvent[] = templates.map(([t, v], i) => ({
     id: "rep_" + shortId(8),
     engagementId: "hist_" + shortId(6),
-    engagementEnsSubname: `eng-${shortId(5)}.pact.eth`,
+    engagementEnsSubname: `eng-${shortId(5)}.pact-hack.eth`,
     businessId: id,
     counterpartySlug: ["harbor-studio", "north-supply", "delta-labs"][i % 3],
     templateType: t as Engagement["templateType"],
@@ -149,7 +149,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await wait(700);
       const walletAddress = mockAddress();
 
-      onStep?.("Minting " + slug + ".pact.eth on ENSv2...");
+      onStep?.("Minting " + slug + ".pact-hack.eth on ENSv2...");
       await wait(900);
 
       onStep?.("Running World Selfie Check...");
@@ -160,7 +160,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const business: Business = {
         id,
         slug,
-        ensSubname: `${slug}.pact.eth`,
+        ensSubname: `${slug}.pact-hack.eth`,
         walletAddress,
         worldVerified: true,
         worldSessionId,
@@ -186,7 +186,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const createProposal = useCallback<StoreShape["createProposal"]>((draft) => {
     const id = "eng_" + shortId(8);
-    const ensSubname = `eng-${shortId(5)}.pact.eth`;
+    const ensSubname = `eng-${shortId(5)}.pact-hack.eth`;
     const payload = JSON.stringify({ ...draft, id, ensSubname });
     const termsHash = mockTermsHash(payload);
     const engagement: Engagement = {

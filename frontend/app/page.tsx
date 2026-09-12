@@ -31,10 +31,10 @@ const failures = [
 ];
 
 const feed = [
-  { a: "harbor-studio.pact.eth", b: "north-supply.pact.eth", tpl: "Milestone", value: "$7,500", flag: "on time" },
-  { a: "delta-labs.pact.eth", b: "unit-agency.pact.eth", tpl: "Retainer", value: "$2,000/mo", flag: "active" },
-  { a: "forge-collective.pact.eth", b: "reef-client.pact.eth", tpl: "Split", value: "$10,000", flag: "atomic" },
-  { a: "quiet-form.pact.eth", b: "atlas-co.pact.eth", tpl: "Fixed", value: "$3,200", flag: "on time" },
+  { a: "harbor-studio.pact-hack.eth", b: "north-supply.pact-hack.eth", tpl: "Milestone", value: "$7,500", flag: "on time" },
+  { a: "delta-labs.pact-hack.eth", b: "unit-agency.pact-hack.eth", tpl: "Retainer", value: "$2,000/mo", flag: "active" },
+  { a: "forge-collective.pact-hack.eth", b: "reef-client.pact-hack.eth", tpl: "Split", value: "$10,000", flag: "atomic" },
+  { a: "quiet-form.pact-hack.eth", b: "atlas-co.pact-hack.eth", tpl: "Fixed", value: "$3,200", flag: "on time" },
 ];
 
 const heroCards = [

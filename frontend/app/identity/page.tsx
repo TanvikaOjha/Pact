@@ -95,7 +95,7 @@ export default function IdentityPage() {
         onChange={(e) => setName(e.target.value)}
         disabled={!!step}
       />
-      <p className="mono-tag text-ink-faint mb-6">{slug}.pact.eth</p>
+      <p className="mono-tag text-ink-faint mb-6">{slug}.pact-hack.eth</p>
 
       <button
         onClick={handleCreate}

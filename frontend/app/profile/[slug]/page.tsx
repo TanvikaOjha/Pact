@@ -19,7 +19,7 @@ export default function ProfilePage() {
   if (!business) {
     return (
       <div className="py-16">
-        <p>No business found at {slug}.pact.eth yet.</p>
+        <p>No business found at {slug}.pact-hack.eth yet.</p>
       </div>
     );
   }
@@ -93,7 +93,7 @@ export default function ProfilePage() {
                 <span className="w-24 text-ink-faint hidden sm:inline">
                   {templateName(e.templateType)}
                 </span>
-                <span className="font-mono w-44 truncate">{e.counterpartySlug}.pact.eth</span>
+                <span className="font-mono w-44 truncate">{e.counterpartySlug}.pact-hack.eth</span>
                 <span className="font-mono w-24">{formatUSDC(e.totalValue)}</span>
                 <span className={e.disputed ? "text-danger" : "text-stamp"}>
                   {e.disputed ? "Disputed" : e.onTime ? "On time" : "Late"}
