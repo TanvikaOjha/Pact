@@ -199,3 +199,8 @@ PACT_ESCROW_ADDRESS=
 ```
 
 ---
+## 🧾 License
+This project is licensed under the MIT License.
+
+---
+
