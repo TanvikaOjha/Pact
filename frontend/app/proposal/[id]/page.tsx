@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { useStore } from "@/lib/store";
-import VerifyStamp from "../../../components/VerifyStamp";
+import VerifyStamp from "@/components/VerifyStamp";
+import TemplateIcon from "../../../components/TemplateIcon";
 import { formatUSDC } from "@/lib/utils";
-import { templateName } from "../../../lib/templates";
+import { templateName } from "@/lib/templates";
 
 export default function ProposalPage() {
   const { id } = useParams<{ id: string }>();
@@ -39,10 +41,20 @@ export default function ProposalPage() {
   }
 
   return (
-    <div className="py-14 max-w-2xl">
-      <p className="mono-tag text-ink-faint mb-2">
-        {templateName(engagement.templateType)} · Proposal
-      </p>
+    <motion.div
+      className="py-14 max-w-2xl"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+    >
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-9 h-9 border border-rule flex items-center justify-center text-stamp shrink-0">
+          <TemplateIcon id={engagement.templateType} size={18} />
+        </div>
+        <p className="mono-tag text-ink-faint">
+          {templateName(engagement.templateType)} · Proposal
+        </p>
+      </div>
       <h1 className="font-serif text-3xl mb-2">{engagement.title}</h1>
       <p className="text-ink-soft mb-8">
         {formatUSDC(engagement.totalAmount)} USDC ·{" "}
@@ -77,6 +89,6 @@ export default function ProposalPage() {
           {signing ?? "Sign and fund escrow"}
         </button>
       )}
-    </div>
+    </motion.div>
   );
 }

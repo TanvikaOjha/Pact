@@ -2,10 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { useStore } from "@/lib/store";
 import MilestoneRow from "@/components/MilestoneRow";
 import WorldSelfieModal from "@/components/WorldSelfieModal";
 import TerminalBlock from "@/components/TerminalBlock";
+import TemplateIcon from "@/components/TemplateIcon";
 import { formatUSDC } from "@/lib/utils";
 import { templateName, WORLD_THRESHOLD } from "@/lib/templates";
 
@@ -63,8 +65,18 @@ export default function EngagementPage() {
     });
   }
 
+  const releasedTotal = released.reduce((s, m) => s + m.amount, 0);
+  const progressPct = engagement.totalAmount
+    ? Math.round((releasedTotal / engagement.totalAmount) * 100)
+    : 0;
+
   return (
-    <div className="py-14">
+    <motion.div
+      className="py-14"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+    >
       {pendingWorldCheck !== null && (
         <WorldSelfieModal
           reason={`Confirming acceptance of milestone ${pendingWorldCheck + 1} (above ${formatUSDC(WORLD_THRESHOLD)})`}
@@ -75,13 +87,18 @@ export default function EngagementPage() {
         />
       )}
 
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <p className="mono-tag text-ink-faint mb-1">{templateName(engagement.templateType)}</p>
-          <h1 className="font-serif text-3xl">{engagement.title}</h1>
+      <div className="flex items-start justify-between mb-2 gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 border border-rule flex items-center justify-center text-stamp shrink-0 mt-0.5">
+            <TemplateIcon id={engagement.templateType} size={20} />
+          </div>
+          <div>
+            <p className="mono-tag text-ink-faint mb-1">{templateName(engagement.templateType)}</p>
+            <h1 className="font-serif text-3xl">{engagement.title}</h1>
+          </div>
         </div>
         <span
-          className={`text-xs px-2 py-1 border capitalize ${
+          className={`text-xs px-2 py-1 border capitalize shrink-0 ${
             engagement.status === "completed"
               ? "border-stamp text-stamp"
               : engagement.status === "disputed"
@@ -96,9 +113,18 @@ export default function EngagementPage() {
       <p className="font-mono text-sm text-ink-faint mb-1">
         {partyA?.ensSubname ?? "…"} ↔ {partyB?.ensSubname ?? `${engagement.partyBSlug}.pact.eth`}
       </p>
-      <p className="font-mono text-sm text-slate mb-8">
+      <p className="font-mono text-sm text-slate mb-3">
         {engagement.ensSubname} ↗ &nbsp;·&nbsp; {formatUSDC(escrowRemaining)} USDC in escrow
       </p>
+
+      <div className="h-1 bg-rule mb-8 max-w-md">
+        <motion.div
+          className="h-1 bg-stamp"
+          initial={{ width: 0 }}
+          animate={{ width: `${progressPct}%` }}
+          transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1] }}
+        />
+      </div>
 
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex gap-2 text-xs">
@@ -137,14 +163,15 @@ export default function EngagementPage() {
         </p>
       )}
 
-      <div className="mb-10">
-        {engagement.milestones.map((m) => (
+      <div className="mb-10 border-l-0">
+        {engagement.milestones.map((m, i) => (
           <MilestoneRow
             key={m.index}
             milestone={m}
             isProvider={isProvider}
             worldRequired={m.worldRequired}
             autoReleaseTemplate={isAutoTemplate}
+            isLast={i === engagement.milestones.length - 1}
             onSubmit={() => submitCompletion(engagement.id, m.index)}
             onAccept={() => handleAccept(m.index)}
             onDispute={() => disputeMilestone(engagement.id, m.index)}
@@ -197,6 +224,6 @@ export default function EngagementPage() {
           </button>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
