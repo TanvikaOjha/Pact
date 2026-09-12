@@ -48,6 +48,13 @@ export function createApp() {
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
       businesses: businessStore,
+      engagements: createSupabaseEngagementStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      milestones: createSupabaseMilestoneStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      ensRoot: env.ENS_ROOT_NAME,
       requireAuth,
     }),
   );

@@ -112,7 +112,8 @@ backend/
     caller sends registerBusiness tx themselves; ENS minting follows)
     routes/businesses.test.ts HTTP tests (memory store)
     routes/proposals.ts  POST /api/proposals (authed, canonical hash) +
-    GET /api/proposals/:token (public link view, 410 past expiry)
+    GET /api/proposals/:token (public link view, 410 past expiry) +
+    POST /api/proposals/:token/accept (counterparty creates engagement)
     routes/engagements.ts POST /api/engagements (mirror intent row) +
     POST /api/engagements/:id/milestones/:index/submit (completion notice,
     starts 48h acceptance window) + .../release (mirror on-chain release,
@@ -134,7 +135,9 @@ backend/
     repos/ens/         repos has businesses.ts; ens/ has pact-terms.ts (more ports
                          only after root scripts stabilize — never fork them)
   supabase/migrations/0001_pact_core.sql + 0002_business_session_unique.sql
-  + 0003_dispute_votes.sql
+  + 0003_dispute_votes.sql + 0004_proposal_accepted.sql
+  src/lifecycle.test.ts  cross-router composition proof (register→propose→
+  accept→submit→release); update it when handoffs change
   oxlint.config.ts
   vitest.config.ts     scopes `npm test` to `src/**` (excludes submodule RuleTester files)
   tools/oxlint/anti-slop/    lint plugin (submodule; loaded by oxlint.config.ts)

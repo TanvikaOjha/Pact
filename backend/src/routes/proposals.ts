@@ -3,8 +3,10 @@ import { Router, type NextFunction, type Request, type RequestHandler, type Resp
 import { z } from "zod";
 
 import type { BusinessStore } from "../repos/businesses.js";
+import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
 import type { NewProposal, ProposalStore, StoredProposalTerms } from "../repos/proposals.js";
 import { hashEngagementTerms, type EngagementTermsInput } from "../ens/pact-terms.js";
+import { log } from "../services/log.js";
 
 const PROPOSAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -42,6 +44,9 @@ const proposalRequestSchema = z.object({
 export interface ProposalsRouteOptions {
   store: ProposalStore;
   businesses: BusinessStore;
+  engagements: EngagementStore;
+  milestones: MilestoneStore;
+  ensRoot: string;
   /** Applied to POST only — GET serves the counterparty link, pre-signup. */
   requireAuth: RequestHandler;
 }
@@ -56,6 +61,10 @@ function milestoneTotal(milestones: z.infer<typeof milestoneSchema>[]): number {
  * sum check mirrors PactEscrow funding (sum must equal total).
  *
  * GET /proposals/:token — public counterparty link view. 410 past expiry.
+ *
+ * POST /proposals/:token/accept — authed counterparty accepts: creates the
+ * engagement mirror (parties, milestones, terms hash) and links the proposal
+ * so double-accept is rejected. On-chain signatures + funding follow.
  */
 export function createProposalsRouter(options: ProposalsRouteOptions): Router {
   const router = Router();
@@ -64,6 +73,9 @@ export function createProposalsRouter(options: ProposalsRouteOptions): Router {
   });
   router.get("/proposals/:token", (req: Request, res: Response, next: NextFunction) => {
     void handleGet(req, res, options).catch(next);
+  });
+  router.post("/proposals/:token/accept", options.requireAuth, (req: Request, res: Response, next: NextFunction) => {
+    void handleAccept(req, res, options).catch(next);
   });
   return router;
 }
@@ -161,5 +173,76 @@ async function handleGet(
     terms: row.fields,
     proposer: proposer === null ? null : { ensSubname: proposer.ens_subname },
     expiresAt: row.expires_at,
+  });
+}
+
+async function handleAccept(
+  req: Request,
+  res: Response,
+  options: ProposalsRouteOptions,
+): Promise<void> {
+  const identity = req.identity;
+  if (identity === undefined) {
+    res.status(401).json({ error: "missing_identity" });
+    return;
+  }
+  const token = req.params.token;
+  if (token === undefined || token === "") {
+    res.status(404).json({ error: "proposal_not_found" });
+    return;
+  }
+  const row = await options.store.findByToken(token);
+  if (row === null) {
+    res.status(404).json({ error: "proposal_not_found" });
+    return;
+  }
+  if (Date.parse(row.expires_at) <= Date.now()) {
+    res.status(410).json({ error: "proposal_expired" });
+    return;
+  }
+  if (row.accepted_engagement_id !== null) {
+    res.status(409).json({ error: "already_accepted", engagementId: row.accepted_engagement_id });
+    return;
+  }
+  const counterparty = await options.businesses.findByWallet(identity.walletAddress);
+  if (counterparty === null) {
+    res.status(403).json({ error: "business_required" });
+    return;
+  }
+  if (row.proposer_id === null || row.proposer_id === counterparty.id) {
+    res.status(400).json({ error: "self_accept" });
+    return;
+  }
+  const proposer = await options.businesses.findById(row.proposer_id);
+  if (proposer === null) {
+    res.status(409).json({ error: "proposer_gone" });
+    return;
+  }
+  const label = randomUUID().replace(/-/g, "").slice(0, 6);
+  const engagement = await options.engagements.insert({
+    onChainId: "offchain",
+    ensSubname: `eng-${label}.${options.ensRoot}`,
+    partyAId: proposer.id,
+    partyBId: counterparty.id,
+    templateType: row.template_type,
+    termsHash: row.fields.termsHash,
+    totalAmount: row.fields.totalAmount,
+  });
+  const created = await options.milestones.insertMany(
+    row.fields.milestones.map((milestone) => ({
+      engagementId: engagement.id,
+      index: milestone.index,
+      name: milestone.name,
+      description: milestone.deliverable,
+      amount: milestone.amount,
+      dueDate: milestone.due,
+    })),
+  );
+  await options.store.markAccepted(token, engagement.id);
+  log.info(`proposal accepted: ${token} -> engagement ${engagement.id}`);
+  res.status(201).json({
+    engagementId: engagement.id,
+    ensSubname: engagement.ens_subname,
+    milestones: created.length,
   });
 }

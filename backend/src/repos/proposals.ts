@@ -31,6 +31,7 @@ export interface ProposalRow {
   proposer_id: string | null;
   expires_at: string;
   created_at: string;
+  accepted_engagement_id: string | null;
 }
 
 export interface NewProposal {
@@ -44,6 +45,7 @@ export interface NewProposal {
 export interface ProposalStore {
   findByToken(token: string): Promise<ProposalRow | null>;
   insert(proposal: NewProposal): Promise<ProposalRow>;
+  markAccepted(token: string, engagementId: string): Promise<ProposalRow | null>;
 }
 
 function firstRow(rows: ProposalRow[] | null): ProposalRow | null {
@@ -82,6 +84,16 @@ export function createSupabaseProposalStore(client: SupabaseClient): ProposalSto
       const row = firstRow(result.data);
       if (row === null) throw new Error("proposal insert returned no row");
       return row;
+    },
+    async markAccepted(token: string, engagementId: string): Promise<ProposalRow | null> {
+      const result = await client
+        .from("proposals")
+        .update({ accepted_engagement_id: engagementId })
+        .eq("token", token)
+        .select()
+        .returns<ProposalRow[]>();
+      if (result.error) throw new Error(`proposal update failed: ${result.error.message}`);
+      return firstRow(result.data);
     },
   };
 }

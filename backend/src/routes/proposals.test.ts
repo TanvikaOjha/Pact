@@ -4,28 +4,47 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import type { BusinessRow, BusinessStore } from "../repos/businesses.js";
+import type {
+  EngagementRow,
+  EngagementStatus,
+  EngagementStore,
+  MilestoneRow,
+  MilestoneStore,
+  NewEngagement,
+  NewMilestone,
+} from "../repos/engagements.js";
 import type { NewProposal, ProposalRow, ProposalStore } from "../repos/proposals.js";
 import { createProposalsRouter } from "./proposals.js";
 
 const WALLET = "0xdddddddddddddddddddddddddddddddddddddddd";
+const WALLET_B = "0xcccccccccccccccccccccccccccccccccccccccc";
 const STRANGER = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
-function createMemoryBusinessStore(): BusinessStore {
-  const row: BusinessRow = {
-    id: "biz-1",
-    wallet_address: WALLET,
+function businessRow(id: string, wallet: string, subname: string): BusinessRow {
+  return {
+    id,
+    wallet_address: wallet,
     privy_wallet_id: "dev",
-    ens_subname: "studio.pact-hack.eth",
-    world_session_id: "session_dev_1",
+    ens_subname: subname,
+    world_session_id: `session_dev_${id}`,
     world_verified_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
   };
+}
+
+function createMemoryBusinessStore(): BusinessStore {
+  const rows: BusinessRow[] = [
+    businessRow("biz-1", WALLET, "studio.pact-hack.eth"),
+    businessRow("biz-2", WALLET_B, "agency.pact-hack.eth"),
+  ];
   return {
-    findById: async (id: string) => (id === row.id ? row : null),
-    findByWallet: async (walletAddress: string) => (walletAddress === WALLET ? row : null),
-    findBySubname: async (ensSubname: string) => (ensSubname === row.ens_subname ? row : null),
+    findById: async (id: string) => rows.find((row) => row.id === id) ?? null,
+    findByWallet: async (walletAddress: string) =>
+      rows.find((row) => row.wallet_address === walletAddress) ?? null,
+    findBySubname: async (ensSubname: string) =>
+      rows.find((row) => row.ens_subname === ensSubname) ?? null,
     findByWorldSession: async (worldSessionId: string) =>
-      worldSessionId === row.world_session_id ? row : null,
+      rows.find((row) => row.world_session_id === worldSessionId) ?? null,
     insert: async () => {
       throw new Error("not implemented in proposal tests");
     },
@@ -44,10 +63,79 @@ function createMemoryProposalStore(): ProposalStore {
         proposer_id: proposal.proposerId,
         expires_at: proposal.expiresAt,
         created_at: new Date().toISOString(),
+        accepted_engagement_id: null,
       };
       rows.set(row.token, row);
       return row;
     },
+    markAccepted: async (token: string, engagementId: string) => {
+      const row = rows.get(token) ?? null;
+      if (row !== null) row.accepted_engagement_id = engagementId;
+      return row;
+    },
+  };
+}
+
+function createMemoryEngagementStore(): EngagementStore {
+  const rows: EngagementRow[] = [];
+  return {
+    findById: async (id: string) => rows.find((row) => row.id === id) ?? null,
+    findByOnChainId: async (onChainId: string) =>
+      rows.find((row) => row.on_chain_id === onChainId) ?? null,
+    insert: async (engagement: NewEngagement) => {
+      const row: EngagementRow = {
+        id: `eng-${rows.length + 1}`,
+        on_chain_id: engagement.onChainId,
+        ens_subname: engagement.ensSubname,
+        party_a_id: engagement.partyAId,
+        party_b_id: engagement.partyBId,
+        template_type: engagement.templateType,
+        terms_hash: engagement.termsHash,
+        total_amount: engagement.totalAmount,
+        status: "PROPOSED",
+        created_at: new Date().toISOString(),
+        completed_at: null,
+      };
+      rows.push(row);
+      return row;
+    },
+    updateStatus: async (id: string, status: EngagementStatus) => {
+      const row = rows.find((candidate) => candidate.id === id) ?? null;
+      if (row !== null) row.status = status;
+      return row;
+    },
+  };
+}
+
+function createMemoryMilestoneStore(): MilestoneStore {
+  const rows: MilestoneRow[] = [];
+  return {
+    listByEngagement: async (engagementId: string) =>
+      rows.filter((row) => row.engagement_id === engagementId),
+    listSubmittedUnreleased: async () => [],
+    findByIndex: async (engagementId: string, index: number) =>
+      rows.find((row) => row.engagement_id === engagementId && row.index === index) ?? null,
+    insertMany: async (entries: NewMilestone[]) => {
+      const created: MilestoneRow[] = entries.map((entry, position) => ({
+        id: `ms-${rows.length + position + 1}`,
+        engagement_id: entry.engagementId,
+        index: entry.index,
+        name: entry.name,
+        description: entry.description,
+        amount: entry.amount,
+        due_date: entry.dueDate,
+        submitted_at: null,
+        released_at: null,
+        disputed: false,
+        world_session_id: null,
+      }));
+      rows.push(...created);
+      return created;
+    },
+    markSubmitted: async () => null,
+    markReleased: async () => null,
+    setDisputed: async () => null,
+    markResolved: async () => null,
   };
 }
 
@@ -67,6 +155,9 @@ interface ProposalEnvelope {
   templateType?: number;
   terms?: { termsHash?: string; title?: string };
   proposer?: { ensSubname?: string } | null;
+  engagementId?: string;
+  ensSubname?: string;
+  milestones?: number;
 }
 
 async function api(
@@ -114,6 +205,9 @@ describe("proposals", () => {
       createProposalsRouter({
         store: proposals,
         businesses: createMemoryBusinessStore(),
+        engagements: createMemoryEngagementStore(),
+        milestones: createMemoryMilestoneStore(),
+        ensRoot: "pact-hack.eth",
         requireAuth: stubAuth,
       }),
     );
@@ -186,5 +280,27 @@ describe("proposals", () => {
     const fetched = await api(port, "GET", `/api/proposals/${token}`, null);
     expect(fetched.status).toBe(410);
     expect(fetched.body.error).toBe("proposal_expired");
+  });
+
+  test("accept creates the engagement mirror and blocks repeats", async () => {
+    const created = await api(port, "POST", "/api/proposals", WALLET, JSON.stringify(DRAFT));
+    const token = created.body.token ?? "";
+
+    const selfAccept = await api(port, "POST", `/api/proposals/${token}/accept`, WALLET);
+    expect(selfAccept.status).toBe(400);
+    expect(selfAccept.body.error).toBe("self_accept");
+
+    const stranger = await api(port, "POST", `/api/proposals/${token}/accept`, STRANGER);
+    expect(stranger.status).toBe(403);
+
+    const accepted = await api(port, "POST", `/api/proposals/${token}/accept`, WALLET_B);
+    expect(accepted.status).toBe(201);
+    expect(accepted.body.engagementId ?? "").toMatch(/^eng-/);
+    expect(accepted.body.ensSubname ?? "").toMatch(/^eng-[0-9a-f]{6}\.pact-hack\.eth$/);
+    expect(accepted.body.milestones).toBe(2);
+
+    const repeat = await api(port, "POST", `/api/proposals/${token}/accept`, WALLET_B);
+    expect(repeat.status).toBe(409);
+    expect(repeat.body.error).toBe("already_accepted");
   });
 });
