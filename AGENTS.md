@@ -112,8 +112,12 @@ backend/
     routes/businesses.test.ts HTTP tests (memory store)
     routes/proposals.ts  POST /api/proposals (authed, canonical hash) +
     GET /api/proposals/:token (public link view, 410 past expiry)
+    routes/engagements.ts POST /api/engagements (mirror intent row) +
+    POST /api/engagements/:id/milestones/:index/submit (completion notice,
+    starts 48h acceptance window; release itself is on-chain, next commit)
     repos/businesses.ts  BusinessStore (Supabase mirror) + in-memory-testable interface
     repos/proposals.ts   ProposalStore (ephemeral drafts, 14d TTL)
+    repos/engagements.ts EngagementStore + MilestoneStore (chain is authoritative)
     ens/pact-terms.ts    Terms-V1 canonicalizer — MUST stay byte-identical to
                          root src/ens/pact-terms.ts (parity vectors in pact-terms.test.ts)
     services/log.ts      the only logger (no-console rule)

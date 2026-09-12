@@ -5,10 +5,12 @@ import { getRegistryReader } from "./chain/registry.js";
 import { errorHandler, requestId } from "./middleware/http.js";
 import { createRequireAuth, createPrivyVerifier, getPrivyClient } from "./middleware/privyAuth.js";
 import { createSupabaseBusinessStore } from "./repos/businesses.js";
+import { createSupabaseEngagementStore, createSupabaseMilestoneStore } from "./repos/engagements.js";
 import { createSupabaseProposalStore } from "./repos/proposals.js";
 import { healthRouter } from "./routes/health.js";
 import { meRouter } from "./routes/me.js";
 import { createBusinessesRouter } from "./routes/businesses.js";
+import { createEngagementsRouter } from "./routes/engagements.js";
 import { createProposalsRouter } from "./routes/proposals.js";
 import { createWorldRouter } from "./routes/world.js";
 
@@ -45,8 +47,18 @@ export function createApp() {
     }),
   );
   apiRouter.use(
-    createBusinessesRouter({
-      store: businessStore,
+    createEngagementsRouter({
+      engagements: createSupabaseEngagementStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      milestones: createSupabaseMilestoneStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      businesses: businessStore,
+    }),
+  );
+  apiRouter.use(
+    createBusinessesRouter({      store: businessStore,
       checkChainActive:
         registryReader === null ? null : (wallet: string) => registryReader.isActive(wallet),
       world: {
