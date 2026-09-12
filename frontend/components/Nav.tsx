@@ -19,7 +19,7 @@ export default function Nav() {
 
   return (
     <header className="border-b border-line bg-canvas/90 backdrop-blur-sm sticky top-0 z-30">
-      <div className="max-w-3xl mx-auto flex items-center justify-between px-6 py-3">
+      <div className="max-w-5xl mx-auto flex items-center justify-between px-6 py-3">
         <Link href="/" className="flex items-center gap-2 group">
           <Seal size={26} />
           <span className="text-xl tracking-tight group-hover:text-accent transition-colors">
