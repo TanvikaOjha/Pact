@@ -25,7 +25,7 @@ export default function RadialGauge({ percent, size = 96, label }: Props) {
           cy={size / 2}
           r={r}
           fill="none"
-          stroke="#C7BFA8"
+          stroke="#D9D2BF"
           strokeWidth={stroke}
         />
         <motion.circle
@@ -49,7 +49,7 @@ export default function RadialGauge({ percent, size = 96, label }: Props) {
           dominantBaseline="central"
           className="font-serif"
           fontSize={size * 0.24}
-          fill="#161A1E"
+          fill="#1B1F24"
         >
           {percent}%
         </text>
