@@ -51,12 +51,10 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 export function loadEnv(): Env {
-  // Alias new secret key (sb_secret_...) into legacy var so existing code just works.
-  // Supabase now shows `Secret API key` (sb_secret_...) instead of `service_role` JWT (eyJ...);
-  // both are bearer tokens for the service role - we accept either name, new is preferred.
+  // Prefer the new secret key (sb_secret_...) over a stale inherited service key.
+  // Supabase now shows `Secret API key` instead of the legacy service_role JWT;
+  // both are bearer tokens for the service role, but the new key is authoritative.
   if (
-    (process.env.SUPABASE_SERVICE_KEY === undefined ||
-      process.env.SUPABASE_SERVICE_KEY === "") &&
     process.env.SUPABASE_SECRET_KEY !== undefined &&
     process.env.SUPABASE_SECRET_KEY !== ""
   ) {

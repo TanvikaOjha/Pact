@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { useAuth } from "@/lib/auth";
 import { usePrivy } from "@privy-io/react-auth";
 import { useToast } from "@/components/Toaster";
@@ -11,6 +10,7 @@ import { slugify, saveSubnameFor } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import TerminalBlock from "@/components/TerminalBlock";
 import WorldSelfieModal from "@/components/WorldSelfieModal";
+import LoginModal from "@/components/LoginModal";
 import Seal from "@/components/Seal";
 
 const STAGES = ["wallet", "ens", "world"] as const;
@@ -26,6 +26,7 @@ export default function IdentityPage() {
   const [name, setName] = useState("");
   const [step, setStep] = useState<string | null>(null);
   const [selfie, setSelfie] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [done, setDone] = useState<{
     ensSubname: string;
     walletAddress: string;
@@ -41,10 +42,6 @@ export default function IdentityPage() {
     if (s.includes("wallet")) return 0;
     if (s.includes("ens") || s.includes("register")) return 1;
     return 2;
-  }
-
-  function generateWallet() {
-    setWallet(privateKeyToAccount(generatePrivateKey()).address);
   }
 
   async function handleCreate() {
@@ -150,6 +147,7 @@ export default function IdentityPage() {
           onDone={() => void handleSelfieDone()}
         />
       )}
+      {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
       <p className="mono-tag text-ink-mute mb-4">Identity setup</p>
       <h1 className="text-3xl font-medium tracking-[-0.8px] mb-6">Your business on Pact</h1>
 

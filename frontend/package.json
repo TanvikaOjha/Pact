@@ -9,9 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@worldcoin/idkit": "^4.2.3",
     "@privy-io/react-auth": "^3.42.0",
+    "@solana-program/system": "^0.9.1",
     "@stripe/stripe-js": "^9.16.0",
+    "@worldcoin/idkit": "^4.2.3",
     "framer-motion": "^13.2.0",
     "next": "16.3.4",
     "react": "19.2.8",

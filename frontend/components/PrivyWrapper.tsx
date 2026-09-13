@@ -10,7 +10,10 @@ export default function PrivyWrapper({ children }: { children: React.ReactNode }
     <PrivyProvider
       appId={appId}
       config={{
-        loginMethods: ["email"],
+        // Both a magic-link email login and "connect an existing wallet"
+        // (MetaMask, WalletConnect, Coinbase Wallet, etc.) show up in the
+        // same Privy modal. Users without a wallet get one created for them.
+        loginMethods: ["email", "wallet"],
         embeddedWallets: {
           ethereum: { createOnLogin: "users-without-wallets" },
         },
