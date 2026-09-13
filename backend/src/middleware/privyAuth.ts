@@ -1,5 +1,6 @@
 import { PrivyClient, type LinkedAccount, type User } from "@privy-io/node";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import { log } from "../services/log.js";
 
 import { log } from "../services/log.js";
 
@@ -157,20 +158,18 @@ async function authenticateToken(
   }
   let claims: { userId: string };
   try {
-    claims = await verifier.verifyToken(token);
-  } catch (error) {
-    logPrivyError(
-      "access-token verification",
-      error instanceof Error ? error : new Error(String(error)),
-    );
-    res.status(401).json({ error: "invalid_token" });
-    return;
-  }
-  let user: User;
-  try {
-    user = await verifier.getUser(claims.userId);
-  } catch (error) {
-    logPrivyError("user lookup", error instanceof Error ? error : new Error(String(error)));
+    const claims = await verifier.verifyToken(token);
+    const user = await verifier.getUser(claims.userId);
+    const identity = resolveIdentity(user);
+    if (identity === null) {
+      res.status(401).json({ error: "no_wallet" });
+      return;
+    }
+    req.identity = identity;
+    next();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    log.error(`privy verify failed: ${detail.slice(0, 300)}`);
     res.status(401).json({ error: "invalid_token" });
     return;
   }

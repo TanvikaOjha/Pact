@@ -16,7 +16,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -112,22 +111,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNonce((n) => n + 1);
   }, []);
 
-  // Privy
+  // Privy - fresh token per request to avoid stale JWTs
   const { ready: privyReady, authenticated, user, getAccessToken, login, logout } = usePrivy();
   const { wallets } = useWallets();
-  const [privyToken, setPrivyToken] = useState<string | null>(null);
 
   // Derive embedded wallet - prefer Privy-managed, else first wallet
   const privyWallet = useMemo(() => {
     if (!authenticated || !user) return null;
-    // Prefer linked embedded wallet
     const embedded = wallets.find((w) => (w as unknown as { walletClientType?: string }).walletClientType === "privy");
     if (embedded?.address) return embedded.address;
     if (wallets[0]?.address) return wallets[0].address;
-    // Fallback to user.wallet (Privy v2 shape)
     const maybeWallet = (user as unknown as { wallet?: { address?: string } }).wallet;
     if (maybeWallet?.address) return maybeWallet.address;
-    // Linked accounts fallback (backend's resolveIdentity prefers embedded)
     const accounts = (user as unknown as { linkedAccounts?: Array<{ type: string; address?: string; walletClient?: string; chainType?: string }> }).linkedAccounts;
     if (accounts) {
       const embeddedAcct = accounts.find((a) => a.type === "wallet" && a.walletClient === "privy" && a.chainType === "ethereum");
@@ -138,38 +133,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   }, [authenticated, user, wallets]);
 
-  useEffect(() => {
-    if (!privyReady || !authenticated) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing Privy auth state to local token, cleared when unauthenticated
-      setPrivyToken(null);
-      return;
-    }
-    void getAccessToken().then((t) => setPrivyToken(t ?? null));
-  }, [privyReady, authenticated, getAccessToken, user]);
-
-  // Effective identity: a real Privy session always wins over a manual one,
-  // so a stale manual address left in storage can never masquerade as an
-  // authenticated Privy identity.
+  // Effective identity: Privy wins when authenticated, else dev fallback
   const walletAddress = authenticated && privyWallet ? privyWallet : stored.walletAddress;
-  const token = authenticated ? privyToken : null;
-  const authMethod: AuthMethod = authenticated && privyWallet ? "privy" : stored.authMethod;
+  const token = stored.token; // display token, real Bearer is fetched fresh per request
   const ready = privyReady && snapshot !== serverSnapshot;
 
-  // Opens Privy's own modal. Whether the person picks email or "connect
-  // wallet" inside it is entirely Privy's UI (see PrivyWrapper's
-  // loginMethods) - this function doesn't need to know which they chose.
-  const connectWithPrivy = useCallback(() => {
-    void login();
-  }, [login]);
-
-  // Explicit, separate manual/read-only sign-in. Never triggers Privy and
-  // never silently coexists with a live Privy session, so there's no path
-  // where a typed-in address is mistaken for a verified one.
-  const signInManual = useCallback(
-    (wallet: string): string | null => {
-      const trimmed = wallet.trim();
-      if (!isValidAddress(trimmed)) {
-        return "Enter a valid 0x… address (42 hex characters).";
+  const signInDev = useCallback(
+    (wallet: string) => {
+      if (process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
+        void login();
+        write({ walletAddress: wallet, token: stored.token });
+        return;
       }
       write({ walletAddress: trimmed, token: null, authMethod: "manual" });
       return null;
@@ -185,23 +159,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(() => {
-    write({ walletAddress: null, token: null, authMethod: null });
-    setPrivyToken(null);
+    write({ walletAddress: null, token: null });
     if (authenticated) void logout();
   }, [write, authenticated, logout]);
 
   const api = useMemo<PactApi>(
     () =>
       createApiClient({
-        // Fetch a current token for each request. Privy can rotate access
-        // tokens during login or refresh, so the render-time token may be
-        // stale when the World verification callback submits registration.
-        getAuth: async () => ({
-          token: authenticated ? await getAccessToken() : null,
-          wallet: walletAddress,
-        }),
+        getAuth: async () => {
+          if (authenticated && privyReady) {
+            try {
+              const t = await getAccessToken();
+              if (t) return { token: t, wallet: privyWallet ?? stored.walletAddress };
+            } catch {
+              // fall through to dev fallback
+            }
+          }
+          return { token: stored.token, wallet: walletAddress };
+        },
       }),
-    [authenticated, getAccessToken, walletAddress],
+    [authenticated, privyReady, privyWallet, stored.token, stored.walletAddress, walletAddress, getAccessToken],
   );
 
   const value = useMemo<AuthContextValue>(
