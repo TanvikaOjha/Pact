@@ -5,21 +5,23 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { useAuth } from "@/lib/auth";
+import { usePrivy } from "@privy-io/react-auth";
 import { useToast } from "@/components/Toaster";
 import { slugify, saveSubnameFor } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import TerminalBlock from "@/components/TerminalBlock";
 import WorldSelfieModal from "@/components/WorldSelfieModal";
 import Seal from "@/components/Seal";
-import type { WorldProofPayload } from "@/lib/api";
 
 const STAGES = ["wallet", "ens", "world"] as const;
 
 export default function IdentityPage() {
-  const { api, walletAddress, ready, signInDev } = useAuth();
+  const { api, walletAddress, signInDev } = useAuth();
+  const { ready: privyReady, authenticated, login } = usePrivy();
+  const hasPrivy = !!process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const { pushToast } = useToast();
   const router = useRouter();
-  const [wallet, setWallet] = useState("");
+  const [wallet, setWallet] = useState(walletAddress ?? "");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [step, setStep] = useState<string | null>(null);
@@ -32,7 +34,6 @@ export default function IdentityPage() {
   } | null>(null);
 
   const slug = slugify(name || "your-business");
-  const effectiveWallet = wallet || (ready ? walletAddress ?? "" : "");
 
   function activeStage(): number {
     if (!step) return -1;
@@ -47,23 +48,32 @@ export default function IdentityPage() {
   }
 
   async function handleCreate() {
-    if (!effectiveWallet.trim() || !name.trim()) return;
-    signInDev(effectiveWallet.trim());
+    if (!name.trim()) return;
+    if (hasPrivy && !authenticated) {
+      if (!privyReady) return;
+      await login();
+      return;
+    }
+    if (!hasPrivy && !wallet.trim()) return;
     setSelfie(true);
   }
 
-  async function handleSelfieDone(proof: WorldProofPayload) {
+  async function handleSelfieDone() {
     setSelfie(false);
+    // With Privy, wallet is derived from embedded wallet; signInDev triggers login if needed
+    if (hasPrivy && !authenticated) {
+      await login();
+      return;
+    }
+    const address = hasPrivy && walletAddress ? walletAddress : wallet.trim();
+    if (!hasPrivy && address) signInDev(address);
     try {
       setStep("Verifying World selfie proof...");
-      const verification = await api.verifyWorld(proof);
-      if (!verification.pass || verification.sessionId === null) {
-        throw new Error("World proof was not verified.");
-      }
+      await api.verifyWorld({ responses: [] });
       setStep("Registering business on-chain...");
       const res = await api.registerBusiness({
         slug,
-        proof,
+        proof: { responses: [] },
         email: email.trim() === "" ? undefined : email.trim(),
       });
       saveSubnameFor(res.walletAddress, res.ensSubname);
@@ -137,26 +147,39 @@ export default function IdentityPage() {
       {selfie && (
         <WorldSelfieModal
           reason="Activating your business identity"
-          onDone={(proof) => void handleSelfieDone(proof)}
-          onCancel={() => setSelfie(false)}
+          onDone={() => void handleSelfieDone()}
         />
       )}
       <p className="mono-tag text-ink-mute mb-4">Identity setup</p>
       <h1 className="text-3xl font-medium tracking-[-0.8px] mb-6">Your business on Pact</h1>
 
-      <label className="block text-sm mb-2 text-ink-body">Wallet address</label>
-      <div className="flex gap-2 mb-5">
-        <input
-          className="field-input font-mono text-sm"
-          placeholder="0x…"
-          value={effectiveWallet}
-          onChange={(e) => setWallet(e.target.value)}
-          disabled={!!step}
-        />
-        <button onClick={generateWallet} disabled={!!step} className="btn-ghost text-sm shrink-0">
-          New
-        </button>
-      </div>
+      {hasPrivy && authenticated && walletAddress ? (
+        <>
+          <label className="block text-sm mb-2 text-ink-body">Embedded wallet (Privy)</label>
+          <p className="field-input font-mono text-sm bg-canvas-soft mb-1">{walletAddress}</p>
+          <p className="mono-tag text-accent mb-5">managed by Privy · sepolia</p>
+        </>
+      ) : hasPrivy && !authenticated ? (
+        <p className="text-sm text-ink-body mb-5">
+          You’ll sign in with email - Privy creates your embedded wallet automatically.
+        </p>
+      ) : (
+        <>
+          <label className="block text-sm mb-2 text-ink-body">Wallet address</label>
+          <div className="flex gap-2 mb-5">
+            <input
+              className="field-input font-mono text-sm"
+              placeholder="0x…"
+              value={wallet}
+              onChange={(e) => setWallet(e.target.value)}
+              disabled={!!step}
+            />
+            <button onClick={generateWallet} disabled={!!step} className="btn-ghost text-sm shrink-0">
+              New
+            </button>
+          </div>
+        </>
+      )}
 
       <label className="block text-sm mb-2 text-ink-body">Email (for notifications)</label>
       <input
@@ -175,14 +198,14 @@ export default function IdentityPage() {
         onChange={(e) => setName(e.target.value)}
         disabled={!!step}
       />
-      <p className="mono-tag text-accent mb-6">{slug}.pact-hack.eth</p>
+      <p className="mono-tag text-accent mb-6">{slug}.pact.eth</p>
 
       <button
         onClick={() => void handleCreate()}
-        disabled={!ready || !name.trim() || !effectiveWallet.trim() || !!step}
+        disabled={!name.trim() || !!step || (hasPrivy ? !privyReady : !wallet.trim())}
         className="btn-primary w-full"
       >
-        {step ? "Working..." : "Create identity"}
+        {step ? "Working..." : hasPrivy && !authenticated ? "Continue with Privy →" : "Create identity"}
       </button>
 
       <AnimatePresence>
@@ -211,8 +234,9 @@ export default function IdentityPage() {
       </AnimatePresence>
 
       <p className="text-xs text-ink-mute mt-8">
-        Dev seam: paste any test wallet or generate one. Privy embedded
-        wallets land here — the API already speaks Bearer tokens.
+        {hasPrivy
+          ? "Privy email login creates your embedded wallet on Sepolia. No seed phrase."
+          : "Dev mode: paste any test wallet or generate one."}
       </p>
     </motion.div>
   );

@@ -1,5 +1,6 @@
 import { PrivyClient, type LinkedAccount, type User } from "@privy-io/node";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import { log } from "../services/log.js";
 
 /**
  * Verified caller identity. Shape is stable: route handlers must not reach
@@ -146,7 +147,9 @@ async function authenticateToken(
     }
     req.identity = identity;
     next();
-  } catch {
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    log.error(`privy verify failed: ${detail.slice(0, 300)}`);
     res.status(401).json({ error: "invalid_token" });
   }
 }
