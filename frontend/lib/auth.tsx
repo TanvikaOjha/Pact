@@ -1,16 +1,8 @@
 "use client";
 
-// Client-side auth state. Three ways to sign in, in order of preference:
-//   1. Privy email login       -> real Bearer token, embedded wallet created
-//   2. Privy wallet connect    -> real Bearer token, external wallet (MetaMask etc.)
-//   3. Manual wallet address   -> no signature, no token; read-only/demo mode only,
-//                                 and only works against a backend running with
-//                                 ALLOW_DEV_AUTH=true (see backend/src/middleware/privyAuth.ts).
-//
-// Methods 1 and 2 are both handled by Privy's own login() modal (see
-// components/PrivyWrapper.tsx, which enables loginMethods: ["email", "wallet"]).
-// Method 3 is a distinct, explicit action (signInManual) so it can never be
-// silently mixed up with a real authenticated session — see authMethod below.
+// Client-side auth state - Privy primary, dev fallback.
+// Privy lands here: @privy-io/react-auth wraps this provider (see components/PrivyWrapper.tsx).
+// Backend already speaks Privy Bearer tokens via backend/src/middleware/privyAuth.ts (verifyAccessToken).
 
 import {
   createContext,
@@ -24,7 +16,6 @@ import type { ReactNode } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { createApiClient } from "./api";
 import type { PactApi } from "./api";
-import { isValidAddress } from "./utils";
 
 const STORAGE_KEY = "pact.auth.v1";
 
@@ -34,16 +25,10 @@ export interface AuthContextValue {
   walletAddress: string | null;
   token: string | null;
   ready: boolean;
-  /** How the current session was established. Null when signed out. */
   authMethod: AuthMethod;
-  /** Opens Privy's login modal (email or connect-wallet, per PrivyWrapper config). */
-  connectWithPrivy(): void;
-  /**
-   * Explicit manual/read-only login: no signature is collected, so the
-   * backend only accepts this when it's running with ALLOW_DEV_AUTH=true.
-   * Returns an error string on invalid input, or null on success.
-   */
+  signInDev(wallet: string): void;
   signInManual(wallet: string): string | null;
+  connectWithPrivy(): void;
   setToken(token: string | null): void;
   signOut(): void;
   api: PactApi;
@@ -78,7 +63,7 @@ function parseSnapshot(raw: string): PersistedAuth {
       walletAddress:
         typeof parsed.walletAddress === "string" ? parsed.walletAddress : null,
       token: typeof parsed.token === "string" ? parsed.token : null,
-      authMethod: parsed.authMethod === "manual" ? "manual" : null,
+      authMethod: parsed.authMethod === "manual" || parsed.authMethod === "privy" ? parsed.authMethod : null,
     };
   } catch {
     return { walletAddress: null, token: null, authMethod: null };
@@ -136,20 +121,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Effective identity: Privy wins when authenticated, else dev fallback
   const walletAddress = authenticated && privyWallet ? privyWallet : stored.walletAddress;
   const token = stored.token; // display token, real Bearer is fetched fresh per request
-  const hasPrivyEnv = !!process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  const ready = hasPrivyEnv ? snapshot !== serverSnapshot : snapshot !== serverSnapshot;
+  const authMethod: AuthMethod = authenticated ? "privy" : stored.authMethod;
+  const ready = snapshot !== serverSnapshot;
 
-  const signInDev = useCallback(
-    (wallet: string) => {
-      if (process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
-        void login();
-        write({ walletAddress: wallet, token: stored.token });
-        return;
-      }
+  const connectWithPrivy = useCallback(() => {
+    void login();
+  }, [login]);
+
+  const signInManual = useCallback(
+    (wallet: string): string | null => {
+      const trimmed = wallet.trim();
+      if (!trimmed) return "Wallet address is required";
+      if (!/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return "Invalid wallet address";
       write({ walletAddress: trimmed, token: null, authMethod: "manual" });
       return null;
     },
     [write],
+  );
+
+  const signInDev = useCallback(
+    (wallet: string) => {
+      // Backward compat alias - now explicit manual
+      const err = signInManual(wallet);
+      if (err) {
+        // Keep old behavior for callers that don't check return
+        write({ walletAddress: wallet, token: stored.token, authMethod: stored.authMethod });
+      }
+    },
+    [signInManual, write, stored.token, stored.authMethod],
   );
 
   const setToken = useCallback(
@@ -160,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(() => {
-    write({ walletAddress: null, token: null });
+    write({ walletAddress: null, token: null, authMethod: null });
     if (authenticated) void logout();
   }, [write, authenticated, logout]);
 
@@ -188,13 +187,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       ready,
       authMethod,
-      connectWithPrivy,
+      signInDev,
       signInManual,
+      connectWithPrivy,
       setToken,
       signOut,
       api,
     }),
-    [walletAddress, token, ready, authMethod, connectWithPrivy, signInManual, setToken, signOut, api],
+    [walletAddress, token, ready, authMethod, signInDev, signInManual, connectWithPrivy, setToken, signOut, api],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

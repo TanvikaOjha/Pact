@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { useAuth } from "@/lib/auth";
 import { usePrivy } from "@privy-io/react-auth";
 import { useToast } from "@/components/Toaster";
@@ -35,6 +36,10 @@ export default function IdentityPage() {
   } | null>(null);
 
   const slug = slugify(name || "your-business");
+
+  function generateWallet() {
+    setWallet(privateKeyToAccount(generatePrivateKey()).address);
+  }
 
   function activeStage(): number {
     if (!step) return -1;

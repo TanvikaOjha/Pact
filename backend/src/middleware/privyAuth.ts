@@ -173,10 +173,6 @@ async function authenticateToken(
   }
 }
 
-function logPrivyError(stage: string, error: Error): void {
-  log.error(`Privy ${stage} failed: ${error.name}: ${error.message}`);
-}
-
 /**
  * Bearer-token auth via Privy; dev-header fallback only when allowDevAuth.
  * Mount on routers that require a verified caller (e.g. `/api`).

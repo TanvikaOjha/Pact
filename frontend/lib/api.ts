@@ -250,6 +250,8 @@ export interface CommitmentMilestone {
   late: boolean;
 }
 
+export type Milestone = CommitmentMilestone;
+
 export interface Commitment {
   id: string;
   onChainId: string;
@@ -316,45 +318,6 @@ export interface ArchiveResponse {
   skips: ArchiveSkip[];
 }
 
-export interface Milestone {
-  index: number;
-  name?: string | null;
-  amount: number;
-  dueDate?: string | null;
-  releasedAt?: string | null;
-  disputed?: boolean;
-}
-
-export interface Commitment {
-  id: string;
-  templateType: number;
-  role: string;
-  ensSubname: string;
-  counterparty?: string | null;
-  totalAmount: number;
-  status: EngagementStatus;
-  createdAt: string;
-  deadline?: string | null;
-  milestones: Milestone[];
-}
-
-export interface CommitmentsResponse {
-  business: string;
-  commitments: Commitment[];
-}
-
-export interface PendingProposal {
-  token: string;
-  templateType: number;
-  title: string;
-  totalAmount: number;
-  expiresAt: string;
-}
-
-export interface PendingProposalsResponse {
-  proposals: PendingProposal[];
-}
-
 export interface WorldRpContext {
   app_id?: string;
   action?: string;
@@ -362,15 +325,12 @@ export interface WorldRpContext {
 }
 
 export interface PactApi {
-  worldRpContext?: WorldRpContext;
   health(): Promise<HealthResponse>;
   me(): Promise<MeResponse>;
   registerBusiness(input: RegisterBusinessInput): Promise<RegisterBusinessResponse>;
   createProposal(draft: CreateProposalInput): Promise<CreateProposalResponse>;
   getProposal(token: string): Promise<GetProposalResponse>;
   acceptProposal(token: string): Promise<AcceptProposalResponse>;
-  getMyCommitments(): Promise<CommitmentsResponse>;
-  getMyPendingProposals(): Promise<PendingProposalsResponse>;
   createEngagement(draft: CreateEngagementInput): Promise<CreateEngagementResponse>;
   submitMilestone(
     id: string,
@@ -472,10 +432,6 @@ export function createApiClient(options?: ApiClientOptions): PactApi {
   }
 
   return {
-    worldRpContext: {
-      app_id: process.env.NEXT_PUBLIC_WORLD_APP_ID,
-      action: "verify",
-    },
     health() {
       return request<HealthResponse>("/health");
     },
@@ -551,12 +507,6 @@ export function createApiClient(options?: ApiClientOptions): PactApi {
     },
     verifyWorld(proof) {
       return post<VerifyWorldResponse>("/api/world/verify", { proof });
-    },
-    getMyCommitments() {
-      return request<CommitmentsResponse>("/api/me/commitments");
-    },
-    getMyPendingProposals() {
-      return request<PendingProposalsResponse>("/api/proposals/mine");
     },
     getReputation(subname) {
       return request<ReputationResponse>(
