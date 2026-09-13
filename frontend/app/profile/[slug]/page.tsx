@@ -10,6 +10,7 @@ import { templateName } from "@/lib/templates";
 import type {
   Commitment,
   CommitmentsResponse,
+  Milestone,
   PendingProposal,
   PendingProposalsResponse,
   ReputationResponse,
@@ -205,20 +206,20 @@ export default function ProfilePage() {
           <div>
             <p className="text-ink-mute">Deadline</p>
             <p className="text-ink-body mt-1">
-              {commitment.deadline === null ? "No deadline" : formatDate(commitment.deadline)}
+              {commitment.deadline === null || commitment.deadline === undefined ? "No deadline" : formatDate(commitment.deadline)}
             </p>
           </div>
           <div>
             <p className="text-ink-mute">Milestones</p>
             <p className="text-ink-body mt-1">
-              {commitment.milestones.filter((milestone) => milestone.releasedAt !== null).length}/
+              {commitment.milestones.filter((milestone: Milestone) => milestone.releasedAt !== null).length}/
               {commitment.milestones.length} released
             </p>
           </div>
         </div>
         {commitment.milestones.length > 0 && (
           <div className="mt-4 space-y-2">
-            {commitment.milestones.map((milestone) => (
+            {commitment.milestones.map((milestone: Milestone) => (
               <div
                 key={milestone.index}
                 className="flex flex-wrap items-center justify-between gap-3 text-xs border-t border-line pt-2"
@@ -228,7 +229,7 @@ export default function ProfilePage() {
                 </span>
                 <span className="font-mono text-ink-mute">
                   {formatUSDC(milestone.amount)} ·{" "}
-                  {milestone.dueDate === null ? "no due date" : `due ${formatDate(milestone.dueDate)}`}
+                  {milestone.dueDate == null ? "no due date" : `due ${formatDate(milestone.dueDate)}`}
                 </span>
                 <span className={milestone.disputed ? "text-danger" : milestone.releasedAt ? "text-accent" : "text-warn"}>
                   {milestone.disputed ? "disputed" : milestone.releasedAt ? "released" : "open"}
