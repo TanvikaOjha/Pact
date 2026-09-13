@@ -24,7 +24,10 @@ const envSchema = z.object({
   WORLD_APP_ID: z.string().optional(),
   WORLD_ACTION_ID: z.string().optional(),
   SUPABASE_URL: z.string().url("SUPABASE_URL must be a URL"),
-  SUPABASE_SERVICE_KEY: z.string().min(1, "SUPABASE_SERVICE_KEY required"),
+  SUPABASE_SERVICE_KEY: z.string().min(1, "SUPABASE_SERVICE_KEY required (or SUPABASE_SECRET_KEY)"),
+  // New platform secret (sb_secret_...). If set and SERVICE_KEY empty, it aliases to SERVICE_KEY.
+  SUPABASE_SECRET_KEY: z.string().optional(),
+  SUPABASE_PUBLISHABLE_KEY: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   NOTIFY_FROM_EMAIL: z.string().min(1).default("Pact <onboarding@resend.dev>"),
   USDC_SEPOLIA_ADDRESS: z.string().optional(),
@@ -46,6 +49,17 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 export function loadEnv(): Env {
+  // Alias new secret key (sb_secret_...) into legacy var so existing code just works.
+  // Supabase now shows `Secret API key` (sb_secret_...) instead of `service_role` JWT (eyJ...);
+  // both are bearer tokens for the service role - we accept either name, new is preferred.
+  if (
+    (process.env.SUPABASE_SERVICE_KEY === undefined ||
+      process.env.SUPABASE_SERVICE_KEY === "") &&
+    process.env.SUPABASE_SECRET_KEY !== undefined &&
+    process.env.SUPABASE_SECRET_KEY !== ""
+  ) {
+    process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SECRET_KEY;
+  }
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
     log.error(`Invalid env: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`);
