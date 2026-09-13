@@ -1,29 +1,20 @@
 "use client";
 
-// Client-side auth state for the Pact backend-sync layer.
-//
-// Auth seam: Privy lands HERE later. Today this holds a dev wallet address
-// (+ an optional Privy access token string) in localStorage; when the Privy
-// SDK is installed, wrap the tree in <PrivyProvider> above/around this
-// provider, replace signInDev() with the Privy login flow, and feed the
-// Privy access token through setToken(). The api client already speaks the
-// backend's auth semantics (Bearer token preferred, dev wallet headers as
-// fallback — see lib/api.ts), so only this file needs to change.
-// No auth SDK is installed yet on purpose.
-//
-// State sync uses useSyncExternalStore over localStorage (no effects): the
-// server snapshot is empty, the client re-reads after hydration, and every
-// writer bumps a nonce so same-tab writes re-render deterministically.
+// Client-side auth state - Privy primary, dev fallback.
+// Privy lands here: @privy-io/react-auth wraps this provider (see components/PrivyWrapper.tsx).
+// Backend already speaks Privy Bearer tokens via backend/src/middleware/privyAuth.ts (verifyAccessToken).
 
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { createApiClient } from "./api";
 import type { PactApi } from "./api";
 
@@ -77,13 +68,12 @@ function writeSnapshot(auth: PersistedAuth): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
   } catch {
-    // Storage unavailable (private mode, quota) — callers still update
-    // React state, so the session works until reload.
+    // Storage unavailable
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Bumped on every same-tab write (storage events only fire cross-tab).
+  // Dev fallback store (localStorage seam for x-wallet-address headers when Privy not authenticated)
   const [nonce, setNonce] = useState(0);
   const serverSnapshot = useMemo(() => "", []);
   const snapshot = useSyncExternalStore(
@@ -95,17 +85,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => parseSnapshot(snapshot.slice(snapshot.indexOf(":") + 1)),
     [snapshot],
   );
-
   const write = useCallback((auth: PersistedAuth) => {
     writeSnapshot(auth);
     setNonce((n) => n + 1);
   }, []);
 
+  // Privy
+  const { ready: privyReady, authenticated, user, getAccessToken, login, logout } = usePrivy();
+  const { wallets } = useWallets();
+  const [privyToken, setPrivyToken] = useState<string | null>(null);
+
+  // Derive embedded wallet - prefer Privy-managed, else first wallet
+  const privyWallet = useMemo(() => {
+    if (!authenticated || !user) return null;
+    // Prefer linked embedded wallet
+    const embedded = wallets.find((w) => (w as unknown as { walletClientType?: string }).walletClientType === "privy");
+    if (embedded?.address) return embedded.address;
+    if (wallets[0]?.address) return wallets[0].address;
+    // Fallback to user.wallet (Privy v2 shape)
+    const maybeWallet = (user as unknown as { wallet?: { address?: string } }).wallet;
+    if (maybeWallet?.address) return maybeWallet.address;
+    // Linked accounts fallback (backend's resolveIdentity prefers embedded)
+    const accounts = (user as unknown as { linkedAccounts?: Array<{ type: string; address?: string; walletClient?: string; chainType?: string }> }).linkedAccounts;
+    if (accounts) {
+      const embeddedAcct = accounts.find((a) => a.type === "wallet" && a.walletClient === "privy" && a.chainType === "ethereum");
+      if (embeddedAcct?.address) return embeddedAcct.address;
+      const eth = accounts.find((a) => a.type === "wallet" && a.chainType === "ethereum");
+      if (eth?.address) return eth.address;
+    }
+    return null;
+  }, [authenticated, user, wallets]);
+
+  useEffect(() => {
+    if (!privyReady || !authenticated) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing Privy auth state to local token, cleared when unauthenticated
+      setPrivyToken(null);
+      return;
+    }
+    void getAccessToken().then((t) => setPrivyToken(t ?? null));
+  }, [privyReady, authenticated, getAccessToken, user]);
+
+  // Effective identity: Privy wins when authenticated, else dev fallback
+  const walletAddress = authenticated && privyWallet ? privyWallet : stored.walletAddress;
+  const token = privyToken ?? stored.token;
+  const ready = privyReady && snapshot !== serverSnapshot;
+
   const signInDev = useCallback(
     (wallet: string) => {
+      // If Privy is configured, trigger real login - dev wallet as fallback when Privy not ready
+      if (process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
+        void login();
+        // Also persist dev wallet for immediate UX before Privy wallet appears
+        write({ walletAddress: wallet, token: stored.token });
+        return;
+      }
       write({ walletAddress: wallet, token: stored.token });
     },
-    [write, stored.token],
+    [write, stored.token, login],
   );
 
   const setToken = useCallback(
@@ -117,30 +153,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     write({ walletAddress: null, token: null });
-  }, [write]);
+    setPrivyToken(null);
+    if (authenticated) void logout();
+  }, [write, authenticated, logout]);
 
   const api = useMemo<PactApi>(
     () =>
       createApiClient({
-        getAuth: () => ({ token: stored.token, wallet: stored.walletAddress }),
+        getAuth: () => ({ token, wallet: walletAddress }),
       }),
-    [stored.token, stored.walletAddress],
+    [token, walletAddress],
   );
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      walletAddress: stored.walletAddress,
-      token: stored.token,
-      // During hydration React renders the server snapshot (""); the client
-      // value lands on the re-render right after. Gates keyed on `ready`
-      // therefore wait exactly one render — no mismatch, no redirect flash.
-      ready: snapshot !== serverSnapshot,
+      walletAddress,
+      token,
+      ready,
       signInDev,
       setToken,
       signOut,
       api,
     }),
-    [stored.walletAddress, stored.token, snapshot, serverSnapshot, signInDev, setToken, signOut, api],
+    [walletAddress, token, ready, signInDev, setToken, signOut, api],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
