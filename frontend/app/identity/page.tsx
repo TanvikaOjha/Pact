@@ -3,27 +3,28 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/components/Toaster";
 import { slugify, saveSubnameFor } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import TerminalBlock from "@/components/TerminalBlock";
 import WorldSelfieModal from "@/components/WorldSelfieModal";
+import LoginModal from "@/components/LoginModal";
 import Seal from "@/components/Seal";
+import { truncateMid } from "@/lib/utils";
 import type { WorldProofPayload } from "@/lib/api";
 
 const STAGES = ["wallet", "ens", "world"] as const;
 
 export default function IdentityPage() {
-  const { api, walletAddress, ready, signInDev } = useAuth();
+  const { api, walletAddress, ready, authMethod, signOut } = useAuth();
   const { pushToast } = useToast();
   const router = useRouter();
-  const [wallet, setWallet] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [step, setStep] = useState<string | null>(null);
   const [selfie, setSelfie] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [done, setDone] = useState<{
     ensSubname: string;
     walletAddress: string;
@@ -32,7 +33,6 @@ export default function IdentityPage() {
   } | null>(null);
 
   const slug = slugify(name || "your-business");
-  const effectiveWallet = wallet || (ready ? walletAddress ?? "" : "");
 
   function activeStage(): number {
     if (!step) return -1;
@@ -42,25 +42,17 @@ export default function IdentityPage() {
     return 2;
   }
 
-  function generateWallet() {
-    setWallet(privateKeyToAccount(generatePrivateKey()).address);
-  }
-
   async function handleCreate() {
-    if (!effectiveWallet.trim() || !name.trim()) return;
-    signInDev(effectiveWallet.trim());
+    if (!walletAddress || !name.trim()) return;
     setSelfie(true);
   }
 
   async function handleSelfieDone(proof: WorldProofPayload) {
     setSelfie(false);
     try {
-      setStep("Verifying World selfie proof...");
-      const verification = await api.verifyWorld(proof);
-      if (!verification.pass || verification.sessionId === null) {
-        throw new Error("World proof was not verified.");
-      }
-      setStep("Registering business on-chain...");
+      // World proofs are single-use. Registration verifies and persists this
+      // proof, so do not submit it to /world/verify first.
+      setStep("Verifying World selfie and registering business...");
       const res = await api.registerBusiness({
         slug,
         proof,
@@ -141,49 +133,74 @@ export default function IdentityPage() {
           onCancel={() => setSelfie(false)}
         />
       )}
+      {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
       <p className="mono-tag text-ink-mute mb-4">Identity setup</p>
       <h1 className="text-3xl font-medium tracking-[-0.8px] mb-6">Your business on Pact</h1>
 
-      <label className="block text-sm mb-2 text-ink-body">Wallet address</label>
-      <div className="flex gap-2 mb-5">
-        <input
-          className="field-input font-mono text-sm"
-          placeholder="0x…"
-          value={effectiveWallet}
-          onChange={(e) => setWallet(e.target.value)}
-          disabled={!!step}
-        />
-        <button onClick={generateWallet} disabled={!!step} className="btn-ghost text-sm shrink-0">
-          New
-        </button>
-      </div>
+      {!ready ? (
+        <p className="text-sm text-ink-mute">Loading…</p>
+      ) : !walletAddress ? (
+        <div className="plate rounded p-5 mb-6">
+          <p className="text-sm text-ink-body mb-3">
+            Sign in first — with email, a connected wallet, or a manual
+            address — then come back to register your business.
+          </p>
+          <button onClick={() => setLoginOpen(true)} className="btn-primary text-sm">
+            Sign in
+          </button>
+        </div>
+      ) : (
+        <>
+          <label className="block text-sm mb-2 text-ink-body">Wallet</label>
+          <div className="flex items-center justify-between gap-2 mb-5 field-input font-mono text-sm">
+            <span>{truncateMid(walletAddress, 8, 6)}</span>
+            <span className="flex items-center gap-2 shrink-0">
+              {authMethod === "manual" && (
+                <span className="mono-tag text-ink-mute">read-only</span>
+              )}
+              <button
+                onClick={signOut}
+                className="text-xs text-ink-mute hover:text-ink transition-colors"
+                disabled={!!step}
+              >
+                Change
+              </button>
+            </span>
+          </div>
 
-      <label className="block text-sm mb-2 text-ink-body">Email (for notifications)</label>
-      <input
-        className="field-input mb-5"
-        placeholder="you@studio.co"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        disabled={!!step}
-      />
+          <label className="block text-sm mb-2 text-ink-body">Email (for notifications)</label>
+          <input
+            className="field-input mb-5"
+            placeholder="you@studio.co"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={!!step}
+          />
 
-      <label className="block text-sm mb-2 text-ink-body">Business name</label>
-      <input
-        className="field-input mb-1"
-        placeholder="e.g. Harbor Studio"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        disabled={!!step}
-      />
-      <p className="mono-tag text-accent mb-6">{slug}.pact-hack.eth</p>
+          <label className="block text-sm mb-2 text-ink-body">Business name</label>
+          <input
+            className="field-input mb-1"
+            placeholder="e.g. Harbor Studio"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={!!step}
+          />
+          <p className="mono-tag text-accent mb-6">{slug}.pact-hack.eth</p>
+          {name.trim() !== "" && slug.length < 3 && (
+            <p className="text-xs text-danger -mt-4 mb-6">
+              Use at least 3 letters or numbers for the business name.
+            </p>
+          )}
 
-      <button
-        onClick={() => void handleCreate()}
-        disabled={!ready || !name.trim() || !effectiveWallet.trim() || !!step}
-        className="btn-primary w-full"
-      >
-        {step ? "Working..." : "Create identity"}
-      </button>
+          <button
+            onClick={() => void handleCreate()}
+            disabled={!name.trim() || slug.length < 3 || !!step}
+            className="btn-primary w-full"
+          >
+            {step ? "Working..." : "Create identity"}
+          </button>
+        </>
+      )}
 
       <AnimatePresence>
         {step && (
@@ -209,11 +226,6 @@ export default function IdentityPage() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      <p className="text-xs text-ink-mute mt-8">
-        Dev seam: paste any test wallet or generate one. Privy embedded
-        wallets land here — the API already speaks Bearer tokens.
-      </p>
     </motion.div>
   );
 }

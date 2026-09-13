@@ -3,6 +3,13 @@
 // GET-engagement endpoint, so snapshots returned by propose/accept/submit
 // calls are the record — chain state stays authoritative.
 
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+
+/** Basic shape check for a hex Ethereum address (no checksum validation). */
+export function isValidAddress(value: string): boolean {
+  return ADDRESS_RE.test(value.trim());
+}
+
 export function truncateMid(value: string, head = 6, tail = 4): string {
   if (value.length <= head + tail + 3) return value;
   return `${value.slice(0, head)}…${value.slice(-tail)}`;

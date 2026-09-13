@@ -1,6 +1,8 @@
 import { PrivyClient, type LinkedAccount, type User } from "@privy-io/node";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 
+import { log } from "../services/log.js";
+
 /**
  * Verified caller identity. Shape is stable: route handlers must not reach
  * into Privy SDK types. `privyWalletId` is the embedded wallet id when the
@@ -26,6 +28,10 @@ interface WalletCandidate {
   address: string;
   id: string | null;
   embedded: boolean;
+}
+
+interface PrivyClientOptionsOverride {
+  jwtVerificationKey?: string;
 }
 
 function embeddedId(account: LinkedAccount): string | null {
@@ -84,7 +90,20 @@ export function getPrivyClient(
   if (appId === undefined || appId === "" || appSecret === undefined || appSecret === "") {
     return null;
   }
-  return new PrivyClient({ appId, appSecret, jwtVerificationKey });
+  const verificationKey = jwtVerificationKey?.trim();
+  const hasPemKey = verificationKey?.includes("-----BEGIN PUBLIC KEY-----") === true;
+  if (verificationKey !== undefined && verificationKey !== "" && !hasPemKey) {
+    log.error("Ignoring invalid PRIVY_JWT_VERIFICATION_KEY; using Privy JWKS");
+  }
+  const clientOptions: PrivyClientOptionsOverride = {};
+  if (hasPemKey && verificationKey !== undefined) {
+    clientOptions.jwtVerificationKey = verificationKey;
+  }
+  return new PrivyClient({
+    appId,
+    appSecret,
+    ...clientOptions,
+  });
 }
 
 /** Adapt PrivyClient to the narrow verifier surface (isolates SDK API drift). */
@@ -136,19 +155,36 @@ async function authenticateToken(
     res.status(503).json({ error: "auth_unavailable" });
     return;
   }
+  let claims: { userId: string };
   try {
-    const claims = await verifier.verifyToken(token);
-    const user = await verifier.getUser(claims.userId);
-    const identity = resolveIdentity(user);
-    if (identity === null) {
-      res.status(401).json({ error: "no_wallet" });
-      return;
-    }
-    req.identity = identity;
-    next();
-  } catch {
+    claims = await verifier.verifyToken(token);
+  } catch (error) {
+    logPrivyError(
+      "access-token verification",
+      error instanceof Error ? error : new Error(String(error)),
+    );
     res.status(401).json({ error: "invalid_token" });
+    return;
   }
+  let user: User;
+  try {
+    user = await verifier.getUser(claims.userId);
+  } catch (error) {
+    logPrivyError("user lookup", error instanceof Error ? error : new Error(String(error)));
+    res.status(401).json({ error: "invalid_token" });
+    return;
+  }
+  const identity = resolveIdentity(user);
+  if (identity === null) {
+    res.status(401).json({ error: "no_wallet" });
+    return;
+  }
+  req.identity = identity;
+  next();
+}
+
+function logPrivyError(stage: string, error: Error): void {
+  log.error(`Privy ${stage} failed: ${error.name}: ${error.message}`);
 }
 
 /**

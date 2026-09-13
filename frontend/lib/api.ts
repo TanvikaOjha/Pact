@@ -17,7 +17,7 @@ export interface ApiCredentials {
 
 export interface ApiClientOptions {
   baseUrl?: string;
-  getAuth?: () => ApiCredentials;
+  getAuth?: () => ApiCredentials | Promise<ApiCredentials>;
 }
 
 /** Opaque World IDKit result, forwarded byte-for-byte and verified server-side. */
@@ -358,8 +358,10 @@ export interface PactApi {
   schedulerArchive(): Promise<ArchiveResponse>;
 }
 
-function authHeaders(getAuth?: () => ApiCredentials): Record<string, string> {
-  const creds = getAuth?.();
+async function authHeaders(
+  getAuth?: () => ApiCredentials | Promise<ApiCredentials>,
+): Promise<Record<string, string>> {
+  const creds = await getAuth?.();
   const token = creds?.token;
   if (token !== undefined && token !== null && token !== "") {
     return { authorization: `Bearer ${token}` };
@@ -394,7 +396,7 @@ export function createApiClient(options?: ApiClientOptions): PactApi {
         ...init,
         headers: {
           "content-type": "application/json",
-          ...authHeaders(getAuth),
+          ...(await authHeaders(getAuth)),
           ...init?.headers,
         },
       });

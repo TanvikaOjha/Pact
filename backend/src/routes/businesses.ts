@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { BusinessStore } from "../repos/businesses.js";
 import { jsonValueSchema, verifyWorldProof } from "../services/world.js";
+import { log } from "../services/log.js";
 
 const registerRequestSchema = z.object({
   slug: z.string().trim().toLowerCase().min(3).max(32).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
@@ -71,6 +72,9 @@ async function handleRegister(
   }
   const parsed = registerRequestSchema.safeParse(req.body);
   if (!parsed.success) {
+    log.error(
+      `business registration validation failed: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`,
+    );
     res.status(400).json({ error: "invalid_request" });
     return;
   }

@@ -13,6 +13,7 @@ import {
 } from "@/lib/utils";
 import { ApiError, type GetProposalResponse } from "@/lib/api";
 import TemplateIcon from "@/components/TemplateIcon";
+import LoginModal from "@/components/LoginModal";
 import { formatUSDC } from "@/lib/utils";
 import { templateName } from "@/lib/templates";
 import type { TemplateType } from "@/lib/types";
@@ -20,13 +21,13 @@ import type { TemplateType } from "@/lib/types";
 export default function ProposalPage() {
   const { id: token } = useParams<{ id: string }>();
   const router = useRouter();
-  const { api, walletAddress, signInDev } = useAuth();
+  const { api, walletAddress } = useAuth();
   const { pushToast } = useToast();
   const [proposal, setProposal] = useState<GetProposalResponse | null>(null);
   const [snapshot, setSnapshot] = useState<ProposalSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
-  const [altWallet, setAltWallet] = useState("");
+  const [loginOpen, setLoginOpen] = useState(false);
 
   const load = useCallback(async () => {
     setSnapshot(loadProposalSnapshot(token));
@@ -170,22 +171,12 @@ export default function ProposalPage() {
       {!walletAddress ? (
         <div className="plate rounded p-5">
           <p className="text-sm text-ink-body mb-3">
-            Sign in with a wallet to counter-sign this proposal.
+            Sign in to counter-sign this proposal.
           </p>
-          <div className="flex gap-2">
-            <input
-              className="field-input font-mono text-sm"
-              placeholder="0x…"
-              value={altWallet}
-              onChange={(e) => setAltWallet(e.target.value)}
-            />
-            <button
-              onClick={() => altWallet.trim() && signInDev(altWallet.trim())}
-              className="btn-primary text-sm shrink-0"
-            >
-              Sign in
-            </button>
-          </div>
+          <button onClick={() => setLoginOpen(true)} className="btn-primary text-sm">
+            Sign in
+          </button>
+          {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
         </div>
       ) : isProposer ? (
         <div className="plate rounded p-5">
