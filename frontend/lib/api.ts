@@ -21,8 +21,16 @@ export interface ApiClientOptions {
 }
 
 /** Opaque World IDKit result, forwarded byte-for-byte and verified server-side. */
+export type WorldProofValue =
+  | string
+  | number
+  | boolean
+  | null
+  | WorldProofValue[]
+  | { [key: string]: WorldProofValue };
+
 export interface WorldProofPayload {
-  [key: string]: string | string[] | number | boolean | null;
+  [key: string]: WorldProofValue;
 }
 
 export class ApiError extends Error {
@@ -197,6 +205,16 @@ export interface VerifyWorldResponse {
   nullifier: string | null;
 }
 
+export interface WorldRpContextResponse {
+  app_id: string;
+  rp_id: string;
+  action: string;
+  nonce: string;
+  created_at: number;
+  expires_at: number;
+  signature: string;
+}
+
 export interface ReputationRecentItem {
   templateType: number;
   totalValue: number;
@@ -218,6 +236,52 @@ export interface ReputationResponse {
   tier: number;
   scoreVersion: number;
   recent: ReputationRecentItem[];
+}
+
+export interface CommitmentMilestone {
+  index: number;
+  name: string | null;
+  description: string | null;
+  amount: number;
+  dueDate: string | null;
+  submittedAt: string | null;
+  releasedAt: string | null;
+  disputed: boolean;
+  late: boolean;
+}
+
+export interface Commitment {
+  id: string;
+  onChainId: string;
+  ensSubname: string;
+  templateType: number;
+  termsHash: string;
+  totalAmount: number;
+  status: EngagementStatus;
+  createdAt: string;
+  completedAt: string | null;
+  role: "provider" | "counterparty";
+  counterparty: string | null;
+  deadline: string | null;
+  milestones: CommitmentMilestone[];
+}
+
+export interface CommitmentsResponse {
+  business: string;
+  commitments: Commitment[];
+}
+
+export interface PendingProposal {
+  token: string;
+  templateType: number;
+  title: string;
+  totalAmount: number;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PendingProposalsResponse {
+  proposals: PendingProposal[];
 }
 
 export interface DueRelease {
@@ -319,6 +383,7 @@ export interface PactApi {
     viaExecute?: boolean,
   ): Promise<ReleaseMilestoneResponse>;
   worldCheck(id: string, index: number, proof: WorldProofPayload): Promise<WorldCheckResponse>;
+  worldRpContext(): Promise<WorldRpContextResponse>;
   raiseDispute(id: string, index: number): Promise<RaiseDisputeResponse>;
   resolveDispute(
     id: string,
@@ -334,6 +399,8 @@ export interface PactApi {
   ): Promise<ProposeResolutionResponse>;
   challengeResolution(id: string, index: number): Promise<ChallengeResolutionResponse>;
   verifyWorld(proof: WorldProofPayload): Promise<VerifyWorldResponse>;
+  getMyCommitments(): Promise<CommitmentsResponse>;
+  getMyPendingProposals(): Promise<PendingProposalsResponse>;
   getReputation(subname: string): Promise<ReputationResponse>;
   schedulerSweep(): Promise<SweepResponse>;
   schedulerArchive(): Promise<ArchiveResponse>;
@@ -371,15 +438,20 @@ export function createApiClient(options?: ApiClientOptions): PactApi {
   const getAuth = options?.getAuth;
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const headers = await authHeaders(getAuth);
-    const res = await fetch(`${baseUrl}${path}`, {
-      ...init,
-      headers: {
-        "content-type": "application/json",
-        ...headers,
-        ...init?.headers,
-      },
-    });
+    const auth = await authHeaders(getAuth);
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}${path}`, {
+        ...init,
+        headers: {
+          "content-type": "application/json",
+          ...auth,
+          ...init?.headers,
+        },
+      });
+    } catch {
+      throw new ApiError(0, "api_unavailable", `Cannot reach Pact backend at ${baseUrl}`);
+    }
     if (!res.ok) {
       let code: string | undefined;
       try {
@@ -452,6 +524,9 @@ export function createApiClient(options?: ApiClientOptions): PactApi {
         { proof },
       );
     },
+    worldRpContext() {
+      return request<WorldRpContextResponse>("/api/world/rp-context");
+    },
     raiseDispute(id, index) {
       return post<RaiseDisputeResponse>(
         `/api/engagements/${encodeURIComponent(id)}/milestones/${index}/dispute`,
@@ -476,6 +551,12 @@ export function createApiClient(options?: ApiClientOptions): PactApi {
     },
     verifyWorld(proof) {
       return post<VerifyWorldResponse>("/api/world/verify", { proof });
+    },
+    getMyCommitments() {
+      return request<CommitmentsResponse>("/api/me/commitments");
+    },
+    getMyPendingProposals() {
+      return request<PendingProposalsResponse>("/api/proposals/mine");
     },
     getReputation(subname) {
       return request<ReputationResponse>(

@@ -136,7 +136,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Effective identity: Privy wins when authenticated, else dev fallback
   const walletAddress = authenticated && privyWallet ? privyWallet : stored.walletAddress;
   const token = stored.token; // display token, real Bearer is fetched fresh per request
-  const ready = privyReady && snapshot !== serverSnapshot;
+  const hasPrivyEnv = !!process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  const ready = hasPrivyEnv ? snapshot !== serverSnapshot : snapshot !== serverSnapshot;
 
   const signInDev = useCallback(
     (wallet: string) => {

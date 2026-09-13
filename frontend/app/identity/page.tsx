@@ -17,7 +17,7 @@ const STAGES = ["wallet", "ens", "world"] as const;
 
 export default function IdentityPage() {
   const { api, walletAddress, signInDev } = useAuth();
-  const { ready: privyReady, authenticated, login } = usePrivy();
+  const { authenticated, login } = usePrivy();
   const hasPrivy = !!process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const { pushToast } = useToast();
   const router = useRouter();
@@ -47,30 +47,36 @@ export default function IdentityPage() {
   async function handleCreate() {
     if (!name.trim()) return;
     if (hasPrivy && !authenticated) {
-      if (!privyReady) return;
-      await login();
+      try {
+        await login();
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : "Privy login failed - check dashboard allowed origins", "danger");
+      }
       return;
     }
     if (!hasPrivy && !wallet.trim()) return;
     setSelfie(true);
   }
 
-  async function handleSelfieDone() {
+  async function handleSelfieDone(proof: import("@/lib/api").WorldProofPayload = { responses: [] }) {
     setSelfie(false);
-    // With Privy, wallet is derived from embedded wallet; signInDev triggers login if needed
     if (hasPrivy && !authenticated) {
-      await login();
+      try {
+        await login();
+      } catch (e) {
+        pushToast(e instanceof Error ? e.message : "Privy login failed", "danger");
+      }
       return;
     }
     const address = hasPrivy && walletAddress ? walletAddress : wallet.trim();
     if (!hasPrivy && address) signInDev(address);
     try {
       setStep("Verifying World selfie proof...");
-      await api.verifyWorld({ responses: [] });
+      await api.verifyWorld(proof);
       setStep("Registering business on-chain...");
       const res = await api.registerBusiness({
         slug,
-        proof: { responses: [] },
+        proof,
         email: email.trim() === "" ? undefined : email.trim(),
       });
       saveSubnameFor(res.walletAddress, res.ensSubname);
@@ -144,7 +150,8 @@ export default function IdentityPage() {
       {selfie && (
         <WorldSelfieModal
           reason="Activating your business identity"
-          onDone={() => void handleSelfieDone()}
+          onDone={(proof) => void handleSelfieDone(proof)}
+          onCancel={() => setSelfie(false)}
         />
       )}
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
@@ -200,7 +207,7 @@ export default function IdentityPage() {
 
       <button
         onClick={() => void handleCreate()}
-        disabled={!name.trim() || !!step || (hasPrivy ? !privyReady : !wallet.trim())}
+        disabled={!name.trim() || !!step || (!hasPrivy && !wallet.trim())}
         className="btn-primary w-full"
       >
         {step ? "Working..." : hasPrivy && !authenticated ? "Continue with Privy →" : "Create identity"}

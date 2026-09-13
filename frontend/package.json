@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@privy-io/react-auth": "^3.42.0",
-    "@solana-program/system": "^0.9.1",
+    "@solana-program/system": "^0.14.1",
+    "@solana/kit": "^8.3.0",
     "@stripe/stripe-js": "^9.16.0",
     "@worldcoin/idkit": "^4.2.3",
     "framer-motion": "^13.2.0",
