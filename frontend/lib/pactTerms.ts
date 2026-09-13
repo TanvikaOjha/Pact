@@ -24,6 +24,12 @@ export type EngagementTermsInput = {
   fields: Record<string, string>;
 };
 
+const TEMPLATE_NAMES = ["fixed", "milestone", "retainer", "t-and-m", "recurring", "split"] as const;
+
+export function templateNameForTerms(templateType: number): string {
+  return TEMPLATE_NAMES[templateType - 1] ?? "custom";
+}
+
 export function canonicalizeEngagementTerms(input: EngagementTermsInput): string {
   const fields = Object.fromEntries(
     Object.entries(input.fields)

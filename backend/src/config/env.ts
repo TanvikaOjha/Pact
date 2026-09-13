@@ -22,7 +22,9 @@ const envSchema = z.object({
   PRIVY_APP_SECRET: z.string().optional(),
   PRIVY_JWT_VERIFICATION_KEY: z.string().optional(),
   WORLD_APP_ID: z.string().optional(),
+  WORLD_RP_ID: z.string().optional(),
   WORLD_ACTION_ID: z.string().optional(),
+  WORLD_SIGNING_KEY: z.string().optional(),
   SUPABASE_URL: z.string().url("SUPABASE_URL must be a URL"),
   SUPABASE_SERVICE_KEY: z.string().min(1, "SUPABASE_SERVICE_KEY required"),
   RESEND_API_KEY: z.string().optional(),
@@ -31,7 +33,7 @@ const envSchema = z.object({
   PACT_REGISTRY_ADDRESS: z.string().optional(),
   PACT_ESCROW_ADDRESS: z.string().optional(),
   // pact-hack.eth is what's actually registered on Sepolia (see src/ens audit);
-  // switch to pact.eth only after it is registered + verified on-chain.
+  // Do not switch this back to pact.eth: pact-hack.eth is the registered root.
   ENS_ROOT_NAME: z.string().min(1).default("pact-hack.eth"),
   PORT: z.coerce.number().default(4000),
   DEV_WORLD_STUB: envFlag(true),

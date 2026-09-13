@@ -2,16 +2,17 @@
 
 import { useState } from "react";
 import { readEnsProfile } from "@/lib/ens";
+import { hashEngagementTerms, type EngagementTermsInput } from "@/lib/pactTerms";
 
 interface Props {
   ensSubname: string;
   records: Array<[string, string]>;
-  termsHash: string;
+  terms: EngagementTermsInput;
 }
 
 type Phase = "idle" | "resolving" | "verified" | "mismatch" | "error";
 
-export default function VerifyStamp({ ensSubname, records: localRecords, termsHash }: Props) {
+export default function VerifyStamp({ ensSubname, records: localRecords, terms }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [chainRecords, setChainRecords] = useState<Record<string, string | null>>({});
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export default function VerifyStamp({ ensSubname, records: localRecords, termsHa
       const keys = [...localRecords.map(([key]) => key), "pact:terms-hash", "pact:status"];
       const result = await readEnsProfile(ensSubname, keys);
       const actualHash = result.records["pact:terms-hash"]?.toLowerCase() ?? "";
-      const expectedHash = termsHash.toLowerCase();
+      const expectedHash = hashEngagementTerms(terms).toLowerCase();
 
       setChainRecords(result.records);
       setPhase(actualHash !== expectedHash ? "mismatch" : "verified");

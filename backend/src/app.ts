@@ -3,7 +3,7 @@ import { loadEnv } from "./config/env.js";
 import { getSupabase } from "./config/supabase.js";
 import { getRegistryReader } from "./chain/registry.js";
 import { getEscrowReader } from "./chain/escrow.js";
-import { errorHandler, requestId } from "./middleware/http.js";
+import { cors, errorHandler, requestId } from "./middleware/http.js";
 import { createRequireAuth, createPrivyVerifier, createRequireCronOrAuth, getPrivyClient } from "./middleware/privyAuth.js";
 import { createIndexerArchive } from "./services/indexer.js";
 import { createSupabaseBusinessStore } from "./repos/businesses.js";
@@ -13,13 +13,14 @@ import { createSupabaseBondStore, createSupabaseEngagementStore, createSupabaseM
 import { createSupabaseProposalStore } from "./repos/proposals.js";
 import { healthRouter } from "./routes/health.js";
 import { meRouter } from "./routes/me.js";
+import { createCommitmentsRouter } from "./routes/commitments.js";
 import { createBusinessesRouter } from "./routes/businesses.js";
 import { createDisputesRouter } from "./routes/disputes.js";
 import { createEngagementsRouter } from "./routes/engagements.js";
 import { createReputationRouter } from "./routes/reputation.js";
 import { createProposalsRouter } from "./routes/proposals.js";
 import { createSchedulerRouter } from "./routes/scheduler.js";
-import { createWorldRouter } from "./routes/world.js";
+import { createWorldRouter, createWorldRpContextRouter } from "./routes/world.js";
 import { startPactCompletedWatcher } from "./services/indexer.js";
 import { log } from "./services/log.js";
 import { createNotifier } from "./services/notifications.js";
@@ -27,9 +28,20 @@ import { createNotifier } from "./services/notifications.js";
 export function createApp() {
   const env = loadEnv();
   const app = express();
+  app.use(cors);
   app.use(express.json());
   app.use(requestId);
   app.use(healthRouter);
+  app.use(
+    "/api",
+    createWorldRpContextRouter({
+      devWorldStub: env.DEV_WORLD_STUB,
+      appId: env.WORLD_APP_ID,
+      rpId: env.WORLD_RP_ID,
+      expectedAction: env.WORLD_ACTION_ID,
+      signingKey: env.WORLD_SIGNING_KEY,
+    }),
+  );
   const apiRouter = Router();
   const privyClient = getPrivyClient(
     env.PRIVY_APP_ID,
@@ -48,10 +60,21 @@ export function createApp() {
   });
   const indexerArchive = createIndexerArchive();
   const notify = createNotifier(env.RESEND_API_KEY, env.NOTIFY_FROM_EMAIL);
-  apiRouter.use(requireAuth);
-  apiRouter.use(meRouter);
   const businessStore = createSupabaseBusinessStore(
     getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+  );
+  apiRouter.use(requireAuth);
+  apiRouter.use(meRouter);
+  apiRouter.use(
+    createCommitmentsRouter({
+      businesses: businessStore,
+      engagements: createSupabaseEngagementStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      milestones: createSupabaseMilestoneStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+    }),
   );
   const registryReader = getRegistryReader(env.SEPOLIA_RPC_URL, env.PACT_REGISTRY_ADDRESS);
   const escrowReader = getEscrowReader(env.SEPOLIA_RPC_URL, env.PACT_ESCROW_ADDRESS);
@@ -92,7 +115,7 @@ export function createApp() {
       highValueThreshold: env.WORLD_HIGH_VALUE_THRESHOLD,
       world: {
         devWorldStub: env.DEV_WORLD_STUB,
-        rpId: env.WORLD_APP_ID,
+        rpId: env.WORLD_RP_ID,
         expectedAction: env.WORLD_ACTION_ID,
       },
       checkReleased:
@@ -164,7 +187,7 @@ export function createApp() {
         registryReader === null ? null : (wallet: string) => registryReader.isActive(wallet),
       world: {
         devWorldStub: env.DEV_WORLD_STUB,
-        rpId: env.WORLD_APP_ID,
+        rpId: env.WORLD_RP_ID,
         expectedAction: env.WORLD_ACTION_ID,
       },
       ensRoot: env.ENS_ROOT_NAME,
@@ -173,7 +196,8 @@ export function createApp() {
   apiRouter.use(
     createWorldRouter({
       devWorldStub: env.DEV_WORLD_STUB,
-      rpId: env.WORLD_APP_ID,
+      appId: env.WORLD_APP_ID,
+      rpId: env.WORLD_RP_ID,
       expectedAction: env.WORLD_ACTION_ID,
     }),
   );

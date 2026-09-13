@@ -159,12 +159,22 @@ npm install
 npm run dev
 ```
 
+For a deployed frontend, copy `frontend/.env.example` to `frontend/.env.local`
+and set `NEXT_PUBLIC_API_URL` to the deployed backend URL. The frontend reads
+ENS text records directly from Sepolia; `NEXT_PUBLIC_SEPOLIA_RPC_URL` should be
+set to a production RPC endpoint rather than relying on the public fallback.
+
 ### Backend
 
 ```bash
 cd backend
 npm install
 ```
+
+For production, copy `backend/.env.example` to `backend/.env`, set
+`ALLOW_DEV_AUTH=false` and `DEV_WORLD_STUB=false`, then provide Privy, World,
+Supabase, RPC, and deployed Pact contract addresses. The backend mirrors
+on-chain state; it does not hold user wallet keys.
 
 ### ENS / TypeScript workspace
 
@@ -175,6 +185,12 @@ npm install
 ```
 
 Do not run the ENS registration/mint scripts against the existing deployed names unless you intentionally need a new deployment.
+
+The ENS flow is split deliberately: the browser resolves and verifies text
+records directly with viem, while the owner-only mint and record writers remain
+in `src/ens/`. Before production use, run `verify-root.ts`, configure the
+deployed Pact contract addresses, mint the business/engagement subnames with
+the owner account, and verify each resolver write before enabling live traffic.
 
 ---
 
@@ -189,7 +205,12 @@ PACT_ETH_OWNER_PRIVATE_KEY=
 PRIVY_APP_ID=
 PRIVY_APP_SECRET=
 WORLD_APP_ID=
+WORLD_RP_ID=
 WORLD_ACTION_ID=
+WORLD_SIGNING_KEY=
+NEXT_PUBLIC_WLD_APP_ID=
+NEXT_PUBLIC_WLD_ACTION=
+NEXT_PUBLIC_WLD_ENVIRONMENT=staging
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
 RESEND_API_KEY=
@@ -203,4 +224,3 @@ PACT_ESCROW_ADDRESS=
 This project is licensed under the MIT License.
 
 ---
-

@@ -12,7 +12,6 @@ import {
   type ProposalSnapshot,
 } from "@/lib/utils";
 import { ApiError, type GetProposalResponse } from "@/lib/api";
-import VerifyStamp from "@/components/VerifyStamp";
 import TemplateIcon from "@/components/TemplateIcon";
 import { formatUSDC } from "@/lib/utils";
 import { templateName } from "@/lib/templates";
@@ -82,11 +81,6 @@ export default function ProposalPage() {
     snapshot !== null &&
     snapshot.proposerWallet.toLowerCase() === walletAddress.toLowerCase();
 
-  const records: Array<[string, string]> = [
-    ...Object.entries(terms.fields),
-    ["pact:terms-hash", terms.termsHash],
-  ];
-
   async function handleAccept() {
     if (!walletAddress) return;
     setAccepting(true);
@@ -101,7 +95,11 @@ export default function ProposalPage() {
         title: terms.title,
         scope: terms.scope,
         acceptanceCriteria: terms.acceptanceCriteria,
+        acceptanceWindowHours: terms.acceptanceWindowHours,
         totalAmount: terms.totalAmount,
+        fields: terms.fields,
+        splitShareA: terms.splitShareA,
+        splitShareB: terms.splitShareB,
         termsHash: terms.termsHash,
         status: "ACTIVE",
         counterparty: snapshot?.counterparty ?? "",
@@ -157,12 +155,16 @@ export default function ProposalPage() {
         <span className="font-mono text-sm">{proposal.proposer?.ensSubname ?? "unknown"}</span>
       </p>
 
-      <div className="mb-6">
-        <VerifyStamp
-          ensSubname={proposal.proposer?.ensSubname ?? ""}
-          records={records}
-          termsHash={terms.termsHash}
-        />
+      <div className="plate rounded p-4 mb-6">
+        <p className="mono-tag text-ink-mute mb-2">Terms commitment</p>
+        <p className="text-xs text-ink-mute mb-1">
+          This is the exact hash the engagement ENS record must publish before
+          signing. The proposer business name is not an engagement record, so
+          it is not used for ENS verification here.
+        </p>
+        <p className="font-mono text-xs text-ink-body break-all">
+          pact:terms-hash = {terms.termsHash}
+        </p>
       </div>
 
       {!walletAddress ? (
