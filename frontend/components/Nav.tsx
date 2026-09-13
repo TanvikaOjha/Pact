@@ -15,6 +15,7 @@ export default function Nav() {
   const links = [
     { href: "/templates", label: "Engagements" },
     { href: "/identity", label: "Identity" },
+    { href: walletAddress ? "/profile/me" : "/identity", label: "Profile" },
   ];
 
   return (
@@ -29,7 +30,7 @@ export default function Nav() {
         <nav className="flex items-center gap-2 text-sm">
           {links.map((l) => (
             <Link
-              key={l.href}
+              key={l.label}
               href={l.href}
               className={`rounded px-3 py-1.5 font-medium transition-colors ${
                 pathname === l.href ? "text-accent" : "text-ink-body hover:text-ink"

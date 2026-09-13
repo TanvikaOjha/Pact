@@ -47,6 +47,7 @@ export interface ProposalStore {
   insert(proposal: NewProposal): Promise<ProposalRow>;
   markAccepted(token: string, engagementId: string): Promise<ProposalRow | null>;
   listExpiringUnaccepted(beforeIso: string): Promise<ProposalRow[]>;
+  listUnacceptedByProposer?(proposerId: string, afterIso: string): Promise<ProposalRow[]>;
 }
 
 function firstRow(rows: ProposalRow[] | null): ProposalRow | null {
@@ -102,6 +103,21 @@ export function createSupabaseProposalStore(client: SupabaseClient): ProposalSto
         .select("*")
         .is("accepted_engagement_id", null)
         .lte("expires_at", beforeIso)
+        .returns<ProposalRow[]>();
+      if (result.error) throw new Error(`proposal lookup failed: ${result.error.message}`);
+      return result.data ?? [];
+    },
+    async listUnacceptedByProposer(
+      proposerId: string,
+      afterIso: string,
+    ): Promise<ProposalRow[]> {
+      const result = await client
+        .from("proposals")
+        .select("*")
+        .eq("proposer_id", proposerId)
+        .is("accepted_engagement_id", null)
+        .gt("expires_at", afterIso)
+        .order("created_at", { ascending: false })
         .returns<ProposalRow[]>();
       if (result.error) throw new Error(`proposal lookup failed: ${result.error.message}`);
       return result.data ?? [];

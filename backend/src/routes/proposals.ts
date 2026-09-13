@@ -15,6 +15,7 @@ import {
 } from "../services/notifications.js";
 
 const PROPOSAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const MAX_MILESTONES = 24;
 
 const TEMPLATE_NAMES = new Map<number, string>([
   [1, "fixed"],
@@ -29,7 +30,9 @@ const milestoneSchema = z.object({
   index: z.number().int().min(0),
   name: z.string().min(1).max(200),
   deliverable: z.string().min(1).max(500),
-  due: z.string().min(1),
+  due: z.string().min(1).refine((value) => Number.isFinite(Date.parse(value)), {
+    message: "due must be a valid date",
+  }),
   amount: z.number().positive(),
   worldRequired: z.boolean(),
 });
@@ -41,7 +44,7 @@ const proposalRequestSchema = z.object({
   acceptanceCriteria: z.string().min(1).max(1000),
   totalAmount: z.number().positive(),
   acceptanceWindowHours: z.number().int().positive().default(48),
-  milestones: z.array(milestoneSchema).max(5).default([]),
+  milestones: z.array(milestoneSchema).max(MAX_MILESTONES).default([]),
   fields: z.record(z.string(), z.string()).default({}),
   splitShareA: z.number().min(0).optional(),
   splitShareB: z.number().min(0).optional(),
@@ -78,6 +81,9 @@ export function createProposalsRouter(options: ProposalsRouteOptions): Router {
   router.post("/proposals", options.requireAuth, (req: Request, res: Response, next: NextFunction) => {
     void handleCreate(req, res, options).catch(next);
   });
+  router.get("/proposals/mine", options.requireAuth, (req: Request, res: Response, next: NextFunction) => {
+    void handleListMine(req, res, options).catch(next);
+  });
   router.get("/proposals/:token", (req: Request, res: Response, next: NextFunction) => {
     void handleGet(req, res, options).catch(next);
   });
@@ -85,6 +91,38 @@ export function createProposalsRouter(options: ProposalsRouteOptions): Router {
     void handleAccept(req, res, options).catch(next);
   });
   return router;
+}
+
+async function handleListMine(
+  req: Request,
+  res: Response,
+  options: ProposalsRouteOptions,
+): Promise<void> {
+  const identity = req.identity;
+  if (identity === undefined) {
+    res.status(401).json({ error: "missing_identity" });
+    return;
+  }
+  const list = options.store.listUnacceptedByProposer;
+  if (list === undefined) {
+    throw new Error("proposal listing is not configured");
+  }
+  const business = await options.businesses.findByWallet(identity.walletAddress);
+  if (business === null) {
+    res.status(403).json({ error: "business_required" });
+    return;
+  }
+  const rows = await list(business.id, new Date().toISOString());
+  res.json({
+    proposals: rows.map((row) => ({
+      token: row.token,
+      templateType: row.template_type,
+      title: row.fields.title,
+      totalAmount: row.fields.totalAmount,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+    })),
+  });
 }
 
 async function handleCreate(

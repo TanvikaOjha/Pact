@@ -97,8 +97,9 @@ export function startCron(jobs: CronJob[]): () => void {
     const tick = (): void => {
       void job
         .run()
-        .catch(() => {
-          log.error(`cron ${job.name} failed`);
+        .catch((error) => {
+          const detail = error instanceof Error ? error.message : String(error);
+          log.error(`cron ${job.name} failed: ${detail}`);
         });
     };
     tick();

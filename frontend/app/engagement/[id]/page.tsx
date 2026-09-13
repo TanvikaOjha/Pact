@@ -20,6 +20,7 @@ import VerifyStamp from "@/components/VerifyStamp";
 import { formatUSDC } from "@/lib/utils";
 import { WORLD_THRESHOLD } from "@/lib/templates";
 import type { TemplateType } from "@/lib/types";
+import { templateNameForTerms } from "@/lib/pactTerms";
 
 const EVIDENCE_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
@@ -223,19 +224,20 @@ export default function EngagementPage() {
       {pendingWorldCheck !== null && (
         <WorldSelfieModal
           reason={`Confirming acceptance of milestone ${pendingWorldCheck + 1} (high value)`}
-          onDone={(passed) => {
+          onDone={(proof) => {
             const eng = engagement;
             const index = pendingWorldCheck;
             setPendingWorldCheck(null);
-            if (!passed || !eng || index === null) return;
+            if (!eng || index === null) return;
             void run(index, "World check", async () => {
-              await api.worldCheck(eng.id, index, { responses: [] });
+              await api.worldCheck(eng.id, index, proof);
               const res = await api.releaseMilestone(eng.id, index);
               patchMilestone(index, { releasedAt: res.releasedAt, disputed: false });
               if (res.engagementCompleted) setStatus("COMPLETED");
               pushToast("Selfie bound — USDC released.", "accent");
             });
           }}
+          onCancel={() => setPendingWorldCheck(null)}
         />
       )}
 
@@ -367,11 +369,28 @@ export default function EngagementPage() {
           <VerifyStamp
             ensSubname={engagement.ensSubname}
             records={[
-              ["pact:scope", engagement.scope],
-              ["pact:amount", String(engagement.totalAmount)],
+              ...Object.entries(engagement.fields),
               ["pact:status", engagement.status.toLowerCase()],
             ]}
-            termsHash={engagement.termsHash}
+            terms={{
+              templateType: templateNameForTerms(engagement.templateType),
+              title: engagement.title,
+              scope: engagement.scope,
+              acceptanceCriteria: engagement.acceptanceCriteria,
+              totalAmount: engagement.totalAmount,
+              acceptanceWindowHours: engagement.acceptanceWindowHours,
+              milestones: engagement.milestones.map((milestone) => ({
+                index: milestone.index,
+                name: milestone.name,
+                deliverable: milestone.deliverable,
+                due: milestone.due,
+                amount: milestone.amount,
+                worldRequired: milestone.worldRequired,
+              })),
+              fields: engagement.fields,
+              splitShareA: engagement.splitShareA,
+              splitShareB: engagement.splitShareB,
+            }}
           />
         </div>
       </div>

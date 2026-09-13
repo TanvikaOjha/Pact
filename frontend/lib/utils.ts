@@ -57,7 +57,11 @@ export interface LocalEngagement {
   title: string;
   scope: string;
   acceptanceCriteria: string;
+  acceptanceWindowHours: number;
   totalAmount: number;
+  fields: Record<string, string>;
+  splitShareA?: number;
+  splitShareB?: number;
   termsHash: string;
   status: LocalEngagementStatus;
   counterparty: string;
@@ -79,6 +83,10 @@ export interface ProposalSnapshot {
   acceptanceCriteria: string;
   totalAmount: number;
   termsHash: string;
+  acceptanceWindowHours: number;
+  fields: Record<string, string>;
+  splitShareA?: number;
+  splitShareB?: number;
   templateType: number;
   templateName: string;
   counterparty: string;

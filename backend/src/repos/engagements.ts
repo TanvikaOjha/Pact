@@ -36,6 +36,8 @@ export interface NewEngagement {
 export interface EngagementStore {
   findById(id: string): Promise<EngagementRow | null>;
   findByOnChainId(onChainId: string): Promise<EngagementRow | null>;
+  /** Available on the Supabase store; optional for focused in-memory test stores. */
+  listByBusiness?(businessId: string): Promise<EngagementRow[]>;
   insert(engagement: NewEngagement): Promise<EngagementRow>;
   updateStatus(id: string, status: EngagementStatus): Promise<EngagementRow | null>;
 }
@@ -122,6 +124,16 @@ export function createSupabaseEngagementStore(client: SupabaseClient): Engagemen
     findById: (id: string) => findOne<EngagementRow>(client, "engagements", "id", id),
     findByOnChainId: (onChainId: string) =>
       findOne<EngagementRow>(client, "engagements", "on_chain_id", onChainId),
+    async listByBusiness(businessId: string): Promise<EngagementRow[]> {
+      const result = await client
+        .from("engagements")
+        .select("*")
+        .or(`party_a_id.eq.${businessId},party_b_id.eq.${businessId}`)
+        .order("created_at", { ascending: false })
+        .returns<EngagementRow[]>();
+      if (result.error) throw new Error(`engagement list failed: ${result.error.message}`);
+      return result.data ?? [];
+    },
     async insert(engagement: NewEngagement): Promise<EngagementRow> {
       const result = await client
         .from("engagements")

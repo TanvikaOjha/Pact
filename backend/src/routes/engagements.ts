@@ -23,6 +23,8 @@ import { recordCompletionIfNeeded } from "../services/reputation.js";
 import { releaseAfter } from "../services/scheduler.js";
 import { devSessionId } from "./businesses.js";
 
+const MAX_MILESTONES = 24;
+
 const milestoneInputSchema = z.object({
   index: z.number().int().min(0),
   name: z.string().min(1).max(200).nullable().default(null),
@@ -38,7 +40,7 @@ const createEngagementSchema = z.object({
   totalAmount: z.number().positive(),
   onChainId: z.string().min(1).default("offchain"),
   ensSubname: z.string().min(1).default("pending.pact-hack.eth"),
-  milestones: z.array(milestoneInputSchema).max(5).default([]),
+  milestones: z.array(milestoneInputSchema).max(MAX_MILESTONES).default([]),
   visibility: z.enum(["public", "commit"]).default("public"),
   defaultProviderBps: z.number().int().min(0).max(10000).nullable().default(null),
   challengeWindowSeconds: z.number().int().positive().nullable().default(null),

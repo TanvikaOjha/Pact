@@ -161,7 +161,7 @@ export default function Landing() {
               transition={{ duration: 0.6, delay: 0.4 }}
             >
               <div className="px-4 py-2.5 border-b border-line flex items-center gap-2">
-                <span className="mono-tag text-ink-mute">propose — eng-a3f9.pact.eth</span>
+                <span className="mono-tag text-ink-mute">propose — eng-a3f9.pact-hack.eth</span>
               </div>
               <div className="px-4 py-3 space-y-1.5 font-mono text-[13px] leading-[18px]">
                 <p><span className="text-ink-mute">pact:type&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span className="text-ink">milestone</span></p>

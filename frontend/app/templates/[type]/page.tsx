@@ -357,7 +357,7 @@ export default function TemplateFormPage() {
         milestones: draft.milestones.map(toApiMilestone),
         fields: {
           ...draft.fields,
-          "pact:party-b": `${slugify(counterpartySlug || "counterparty")}.pact.eth`,
+          "pact:party-b": `${slugify(counterpartySlug || "counterparty")}.pact-hack.eth`,
         },
         splitShareA: draft.splitShareA,
         splitShareB: draft.splitShareB,
@@ -369,6 +369,10 @@ export default function TemplateFormPage() {
         acceptanceCriteria: draft.acceptance,
         totalAmount: draft.total,
         termsHash: res.termsHash,
+        acceptanceWindowHours: windowHours,
+        fields: draft.fields,
+        splitShareA: draft.splitShareA,
+        splitShareB: draft.splitShareB,
         templateType: draft.templateIndex,
         templateName: meta?.name ?? type,
         counterparty: slugify(counterpartySlug || "counterparty"),
@@ -442,7 +446,7 @@ export default function TemplateFormPage() {
               onChange={(e) => setCounterpartySlug(e.target.value)}
             />
             <p className="mono-tag text-accent mt-2">
-              {slugify(counterpartySlug || "counterparty")}.pact.eth
+              {slugify(counterpartySlug || "counterparty")}.pact-hack.eth
             </p>
           </div>
 
@@ -485,7 +489,7 @@ export default function TemplateFormPage() {
           <TerminalBlock
             records={Object.entries({
               ...draft.fields,
-              "pact:party-b": `${slugify(counterpartySlug || "counterparty")}.pact.eth (set when they sign)`,
+              "pact:party-b": `${slugify(counterpartySlug || "counterparty")}.pact-hack.eth (set when they sign)`,
               "pact:status": "proposed",
             })}
           />
@@ -831,7 +835,7 @@ function TemplateFields({ type, state }: { type: TemplateType; state: FormState 
             className="field-input"
             value={state.spClientEns}
             onChange={str(state.setSpClientEns)}
-            placeholder="reef-client.pact.eth"
+            placeholder="reef-client.pact-hack.eth"
           />
         </Field>
         <Field label={`Your share: ${state.spShareA}% · Co-provider: ${100 - state.spShareA}%`}>

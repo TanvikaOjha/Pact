@@ -33,6 +33,7 @@ function addDecimalStrings(a: string, b: string): string {
 
 export interface CounterDelta {
   totalValue: string
+  completed: boolean
   disputed: boolean
 }
 
@@ -58,7 +59,7 @@ export async function incrementBusinessCounters(
       key: 'pact:total-value',
     }) ?? '0'
 
-    const nextCompleted = String(Number(completed) + 1)
+    const nextCompleted = String(Number(completed) + (delta.completed ? 1 : 0))
     const nextDisputes = String(
       Number(disputes) + (delta.disputed ? 1 : 0),
     )
@@ -140,6 +141,7 @@ async function main() {
     namesArg.split(',').map((x) => x.trim()).filter(Boolean),
     {
       totalValue,
+      completed: disputedArg !== 'true',
       disputed: disputedArg === 'true',
     },
   )

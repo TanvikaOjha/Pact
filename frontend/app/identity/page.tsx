@@ -11,14 +11,15 @@ import { ApiError } from "@/lib/api";
 import TerminalBlock from "@/components/TerminalBlock";
 import WorldSelfieModal from "@/components/WorldSelfieModal";
 import Seal from "@/components/Seal";
+import type { WorldProofPayload } from "@/lib/api";
 
 const STAGES = ["wallet", "ens", "world"] as const;
 
 export default function IdentityPage() {
-  const { api, walletAddress, signInDev } = useAuth();
+  const { api, walletAddress, ready, signInDev } = useAuth();
   const { pushToast } = useToast();
   const router = useRouter();
-  const [wallet, setWallet] = useState(walletAddress ?? "");
+  const [wallet, setWallet] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [step, setStep] = useState<string | null>(null);
@@ -31,6 +32,7 @@ export default function IdentityPage() {
   } | null>(null);
 
   const slug = slugify(name || "your-business");
+  const effectiveWallet = wallet || (ready ? walletAddress ?? "" : "");
 
   function activeStage(): number {
     if (!step) return -1;
@@ -45,21 +47,23 @@ export default function IdentityPage() {
   }
 
   async function handleCreate() {
-    if (!wallet.trim() || !name.trim()) return;
+    if (!effectiveWallet.trim() || !name.trim()) return;
+    signInDev(effectiveWallet.trim());
     setSelfie(true);
   }
 
-  async function handleSelfieDone() {
+  async function handleSelfieDone(proof: WorldProofPayload) {
     setSelfie(false);
-    const address = wallet.trim();
-    signInDev(address);
     try {
       setStep("Verifying World selfie proof...");
-      await api.verifyWorld({ responses: [] });
+      const verification = await api.verifyWorld(proof);
+      if (!verification.pass || verification.sessionId === null) {
+        throw new Error("World proof was not verified.");
+      }
       setStep("Registering business on-chain...");
       const res = await api.registerBusiness({
         slug,
-        proof: { responses: [] },
+        proof,
         email: email.trim() === "" ? undefined : email.trim(),
       });
       saveSubnameFor(res.walletAddress, res.ensSubname);
@@ -133,7 +137,8 @@ export default function IdentityPage() {
       {selfie && (
         <WorldSelfieModal
           reason="Activating your business identity"
-          onDone={() => void handleSelfieDone()}
+          onDone={(proof) => void handleSelfieDone(proof)}
+          onCancel={() => setSelfie(false)}
         />
       )}
       <p className="mono-tag text-ink-mute mb-4">Identity setup</p>
@@ -144,7 +149,7 @@ export default function IdentityPage() {
         <input
           className="field-input font-mono text-sm"
           placeholder="0x…"
-          value={wallet}
+          value={effectiveWallet}
           onChange={(e) => setWallet(e.target.value)}
           disabled={!!step}
         />
@@ -170,11 +175,11 @@ export default function IdentityPage() {
         onChange={(e) => setName(e.target.value)}
         disabled={!!step}
       />
-      <p className="mono-tag text-accent mb-6">{slug}.pact.eth</p>
+      <p className="mono-tag text-accent mb-6">{slug}.pact-hack.eth</p>
 
       <button
         onClick={() => void handleCreate()}
-        disabled={!name.trim() || !wallet.trim() || !!step}
+        disabled={!ready || !name.trim() || !effectiveWallet.trim() || !!step}
         className="btn-primary w-full"
       >
         {step ? "Working..." : "Create identity"}
