@@ -2,7 +2,6 @@ import { PrivyClient, type LinkedAccount, type User } from "@privy-io/node";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { log } from "../services/log.js";
 
-import { log } from "../services/log.js";
 
 /**
  * Verified caller identity. Shape is stable: route handlers must not reach
@@ -145,6 +144,7 @@ export function privyAuthStub(req: Request, res: Response, next: NextFunction): 
   next();
 }
 
+
 async function authenticateToken(
   req: Request,
   res: Response,
@@ -156,7 +156,6 @@ async function authenticateToken(
     res.status(503).json({ error: "auth_unavailable" });
     return;
   }
-  let claims: { userId: string };
   try {
     const claims = await verifier.verifyToken(token);
     const user = await verifier.getUser(claims.userId);
@@ -171,15 +170,7 @@ async function authenticateToken(
     const detail = err instanceof Error ? err.message : String(err);
     log.error(`privy verify failed: ${detail.slice(0, 300)}`);
     res.status(401).json({ error: "invalid_token" });
-    return;
   }
-  const identity = resolveIdentity(user);
-  if (identity === null) {
-    res.status(401).json({ error: "no_wallet" });
-    return;
-  }
-  req.identity = identity;
-  next();
 }
 
 function logPrivyError(stage: string, error: Error): void {
