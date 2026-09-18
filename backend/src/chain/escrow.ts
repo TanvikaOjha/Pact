@@ -3,6 +3,17 @@ import { sepolia } from "viem/chains";
 
 import { log } from "../services/log.js";
 
+/** Auto-generated getter for `mapping(bytes32 => mapping(address => uint256)) public pendingShares`. */
+const pendingSharesGetterAbi = [
+  {
+    type: "function",
+    name: "pendingShares",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "bytes32" }, { name: "", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
+] as const;
+
 /** Auto-generated getter for `mapping(bytes32 => mapping(uint256 => Milestone))`. */
 /* Appended M4 fields (evidenceHash, late) keep released/disputed positions. */
 const milestonesGetterAbi = [
@@ -42,7 +53,7 @@ export interface EscrowReader {
   isDisputed(onChainId: string, index: number): Promise<boolean | null>;
   
   isWorldAttested(onChainId: string, index: number): Promise<boolean | null>;
-
+  getPendingShare(onChainId: string, recipient: string): Promise<number | null>;
 }
 
 /** Null when chain config is absent; callers degrade explicitly. */
@@ -71,6 +82,18 @@ export function getEscrowReader(
     });
   }
   return {
+    getPendingShare: async (onChainId: string, recipient: string): Promise<number | null> => {
+      if (!BYTES32_PATTERN.test(onChainId) || !isAddress(recipient)) return null;
+      // SAFETY: regex enforces 0x + 64 hex chars, exactly the bytes32 shape.
+      const id = onChainId as `0x${string}`;
+      const amount = await client.readContract({
+        address: escrow,
+        abi: pendingSharesGetterAbi,
+        functionName: "pendingShares",
+        args: [id, recipient],
+      });
+      return Number(amount);
+    },
     isReleased: async (onChainId: string, index: number): Promise<boolean | null> => {
       const milestone = await readMilestone(onChainId, index);
       if (milestone === null) return null;
