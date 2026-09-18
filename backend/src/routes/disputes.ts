@@ -5,6 +5,7 @@ import type { BusinessStore } from "../repos/businesses.js";
 import type { DisputeProposalStore, DisputeVoteStore } from "../repos/disputes.js";
 import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
 import type { ReputationStore } from "../repos/reputation.js";
+import { releaseAfter } from "../services/scheduler.js";
 import { log } from "../services/log.js";
 import {
   disputeRaisedEmail,
@@ -58,19 +59,100 @@ const DEFAULT_CHALLENGE_WINDOW_SECONDS = 7 * 24 * 3600;
  */
 export function createDisputesRouter(options: DisputesRouteOptions): Router {
   const router = Router();
-  router.post("/engagements/:id/milestones/:index/dispute", (req: Request, res: Response, next: NextFunction) => {
+  router.post("/engagements/:id/milestones/:index/dispute", (req, res, next) => {
     void handleRaise(req, res, options).catch(next);
   });
-  router.post("/engagements/:id/milestones/:index/resolve", (req: Request, res: Response, next: NextFunction) => {
+  router.post("/engagements/:id/milestones/:index/resolve", (req, res, next) => {
     void handleResolve(req, res, options).catch(next);
   });
-  router.post("/engagements/:id/milestones/:index/resolve-propose", (req: Request, res: Response, next: NextFunction) => {
+  router.post("/engagements/:id/milestones/:index/resolve-propose", (req, res, next) => {
     void handleResolvePropose(req, res, options).catch(next);
   });
-  router.post("/engagements/:id/milestones/:index/resolve-challenge", (req: Request, res: Response, next: NextFunction) => {
+  router.post("/engagements/:id/milestones/:index/resolve-challenge", (req, res, next) => {
     void handleResolveChallenge(req, res, options).catch(next);
   });
+  router.post("/engagements/:id/milestones/:index/resolve-execute", (req, res, next) => {
+    void handleResolveExecute(req, res, options).catch(next);
+  });
   return router;
+}
+
+/**
+ * Mirror of PactEscrow.executeResolution: anyone may call this once the
+ * proposal's challenge window has closed. Pays the proposed split when
+ * unchallenged, otherwise the engagement's pre-agreed default split
+ * (default_provider_bps), exactly like the contract. Marks the proposal
+ * executed so it drops out of listOpen() and stops generating
+ * challenge-closing reminders forever.
+ */
+async function handleResolveExecute(
+  req: Request,
+  res: Response,
+  options: DisputesRouteOptions,
+): Promise<void> {
+  const context = await loadMilestoneContext(req, res, options);
+  if (!context.ok) return;
+  const { engagement, milestone, index } = context;
+  if (milestone.released_at !== null) {
+    res.status(409).json({ error: "already_released" });
+    return;
+  }
+  if (!milestone.disputed) {
+    res.status(409).json({ error: "not_disputed" });
+    return;
+  }
+  const proposal = await options.proposals.findProposal(engagement.id, index);
+  if (proposal === null) {
+    res.status(404).json({ error: "proposal_not_found" });
+    return;
+  }
+  if (proposal.executed_at !== null) {
+    res.status(409).json({ error: "already_executed" });
+    return;
+  }
+  if (Date.parse(proposal.challenge_deadline) > Date.now()) {
+    res.status(409).json({ error: "window_not_closed", challengeDeadline: proposal.challenge_deadline });
+    return;
+  }
+
+  let providerAmount: number;
+  let clientRefund: number;
+  if (proposal.challenged) {
+    const defaultBps = engagement.default_provider_bps ?? 5000;
+    providerAmount = Math.floor((milestone.amount * defaultBps) / 10_000);
+    clientRefund = milestone.amount - providerAmount;
+  } else {
+    providerAmount = proposal.provider_amount;
+    clientRefund = proposal.client_refund;
+  }
+
+  const releasedAt = new Date().toISOString();
+  await options.milestones.markResolved(milestone.id, releasedAt);
+  await options.proposals.markExecuted(engagement.id, index, releasedAt);
+  await options.engagements.updateStatus(engagement.id, "ACTIVE");
+  const engagementCompleted = await recordCompletionIfNeeded(
+    {
+      engagements: options.engagements,
+      milestones: options.milestones,
+      votes: options.votes,
+      reputation: options.reputation,
+    },
+    engagement.id,
+  );
+  log.info(`resolution executed: engagement ${engagement.id} milestone ${index} challenged=${proposal.challenged}`);
+  await notifyAll(
+    options.notify,
+    await recipientEmails(options.businesses, engagement),
+    disputeResolvedEmail(engagement.ens_subname, milestone.name, index),
+  );
+  res.json({
+    executed: true,
+    releasedAt,
+    providerAmount,
+    clientRefund,
+    challenged: proposal.challenged,
+    engagementCompleted,
+  });
 }
 
 async function handleRaise(
