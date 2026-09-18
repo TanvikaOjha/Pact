@@ -96,7 +96,8 @@ export function createApp() {
       notify,
     }),
   );
-  apiRouter.use(
+  
+   apiRouter.use(
     createEngagementsRouter({
       engagements: createSupabaseEngagementStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
@@ -122,8 +123,13 @@ export function createApp() {
         escrowReader === null
           ? null
           : (onChainId: string, index: number) => escrowReader.isReleased(onChainId, index),
+      checkWorldAttested:
+        escrowReader === null
+          ? null
+          : (onChainId: string, index: number) => escrowReader.isWorldAttested(onChainId, index),
     }),
   );
+  
   // Scheduler sits outside apiRouter on purpose: apiRouter enforces Privy
   // user auth, while the sweep also accepts the CRON_SECRET service token
   // for external cron. Detect+notify by default; wire requestAutoRelease
