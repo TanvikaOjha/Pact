@@ -20,6 +20,17 @@ export interface CanonicalMilestone {
   worldRequired: boolean;
 }
 
+/** M5 N-way split recipient, in on-chain array order (last absorbs dust). */
+export interface CanonicalSplitRecipientInput {
+  wallet: string;
+  sharesBps: number;
+}
+
+export interface CanonicalSplitRecipient {
+  wallet: string;
+  sharesBps: number;
+}
+
 export interface EngagementTermsInput {
   templateType: string;
   title: string;
@@ -28,8 +39,11 @@ export interface EngagementTermsInput {
   totalAmount: number;
   acceptanceWindowHours: number;
   milestones: CanonicalMilestoneInput[];
+  /** Legacy 2-party split (Template 6 original shape). Mutually exclusive with splitRecipients in practice. */
   splitShareA?: number;
   splitShareB?: number;
+  /** M5 N-way split recipients. Order is preserved — it is NOT re-sorted. */
+  splitRecipients?: CanonicalSplitRecipientInput[];
   fields: Record<string, string>;
 }
 
@@ -45,12 +59,17 @@ interface CanonicalTermsPayload {
   fields: Record<string, string>;
   splitShareA?: number;
   splitShareB?: number;
+  splitRecipients?: CanonicalSplitRecipient[];
 }
 
 /**
  * Pact Terms V1 canonicalizer. MUST stay byte-identical to
  * `src/ens/pact-terms.ts` (root CLI package) and `frontend/lib/pactTerms.ts`:
  * the hash is the cross-party commitment written to `pact:terms-hash`.
+ *
+ * splitRecipients was added for M5 (N-way splits) after splitShareA/B; it is
+ * appended to the payload only when present, so every existing splitShareA/B
+ * hash vector (see pact-terms.test.ts) is unaffected by this change.
  *
  * Known fragility (do NOT "fix" unilaterally — any change alters every hash):
  * field sorting uses `localeCompare` with the runtime default locale, so a
@@ -93,6 +112,13 @@ export function canonicalizeEngagementTerms(input: EngagementTermsInput): string
   }
   if (input.splitShareB !== undefined) {
     payload.splitShareB = Number(input.splitShareB);
+  }
+  if (input.splitRecipients !== undefined) {
+    // Order is the on-chain array order, not sorted — do not add a sort here.
+    payload.splitRecipients = input.splitRecipients.map((recipient) => ({
+      wallet: String(recipient.wallet).toLowerCase(),
+      sharesBps: Number(recipient.sharesBps),
+    }));
   }
 
   return JSON.stringify(payload);

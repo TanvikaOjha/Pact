@@ -2,9 +2,11 @@ import { createPublicClient, http, isAddress, parseAbiItem } from "viem";
 import { sepolia } from "viem/chains";
 import { z } from "zod";
 
+import type { EscrowReader } from "../chain/escrow.js";
 import type { BusinessStore } from "../repos/businesses.js";
-import type { BondStore } from "../repos/engagements.js";
+import type { BondRow, BondStore, EngagementStore, MilestoneStore, NewBond } from "../repos/engagements.js";
 import type { NewReputationEvent, ReputationStore } from "../repos/reputation.js";
+import type { SplitStore } from "../repos/splits.js";
 import { log } from "./log.js";
 
 const pactCompletedEvent = parseAbiItem(
@@ -25,6 +27,14 @@ const bondSlashedEvent = parseAbiItem(
 
 const bondFrozenEvent = parseAbiItem(
   "event BondFrozen(bytes32 indexed engagementId)",
+);
+
+const splitReleasedEvent = parseAbiItem(
+  "event SplitReleased(bytes32 indexed engagementId, uint256 total)",
+);
+
+const shareClaimedEvent = parseAbiItem(
+  "event ShareClaimed(bytes32 indexed engagementId, address indexed recipient, uint256 amount)",
 );
 
 export interface PactCompletedLog {
@@ -76,6 +86,16 @@ export interface IndexerOptions {
   reputation: ReputationStore;
   bonds: BondStore;
   archive?: IndexerArchive;
+  /**
+   * M5 split mirror. All three of splits/engagements/milestones plus
+   * escrowReader are required together to watch SplitReleased/ShareClaimed;
+   * partial wiring leaves that watcher off (log-only), same as the
+   * chain/registry.ts and chain/escrow.ts "null when unconfigured" pattern.
+   */
+  splits?: SplitStore;
+  engagements?: EngagementStore;
+  milestones?: MilestoneStore;
+  escrowReader?: EscrowReader;
 }
 
 export interface BondEventDecoded {
@@ -98,6 +118,17 @@ const bondLogSchema = z.object({
       bonder: z.string().optional(),
       provider: z.string().optional(),
       amount: z.union([z.bigint(), z.number()]).optional(),
+    })
+    .passthrough(),
+});
+
+/** Boundary decode for split logs (SplitReleased / ShareClaimed). */
+const splitLogSchema = z.object({
+  eventName: z.string(),
+  args: z
+    .object({
+      engagementId: z.string().optional(),
+      recipient: z.string().optional(),
     })
     .passthrough(),
 });
@@ -201,14 +232,67 @@ export async function recordPactCompleted(
   return true;
 }
 
+export interface SplitEventStores {
+  engagements: EngagementStore;
+  milestones: MilestoneStore;
+  splits: SplitStore;
+  escrowReader: EscrowReader;
+}
+
 /**
- * Watch PactCompleted events and mirror them. Returns the unwatch function,
- * or null when unconfigured (callers treat null as "indexer disabled").
- * No backfill: restarts only observe new events. Skips are logged and
- * archived for ops via options.archive when provided.
- *
- * Bond events (BondPosted/Returned/Slashed/Frozen) ride a second watcher on
- * the same escrow with the same disabled-when-unconfigured semantics.
+ * Mirror of SplitReleased: marks milestone 0 released (covers the case where
+ * the release happened via a direct on-chain call, bypassing the backend's
+ * release route entirely — the FilePizza mechanic) and re-reads
+ * pendingShares() for every known recipient, since the contract emits no
+ * per-recipient event for a failed transfer that fell back to pull-payment.
+ */
+export async function recordSplitReleased(
+  stores: SplitEventStores,
+  onChainId: string,
+): Promise<void> {
+  const engagement = await stores.engagements.findByOnChainId(onChainId);
+  if (engagement === null) {
+    log.error(`indexer skipping SplitReleased for unknown engagement ${onChainId}`);
+    return;
+  }
+  const milestone = await stores.milestones.findByIndex(engagement.id, 0);
+  if (milestone !== null && milestone.released_at === null) {
+    await stores.milestones.markReleased(milestone.id, new Date().toISOString());
+  }
+  const recipients = await stores.splits.listRecipients(engagement.id);
+  for (const recipient of recipients) {
+    const remaining = await stores.escrowReader.getPendingShare(onChainId, recipient.wallet_address);
+    if (remaining !== null) {
+      await stores.splits.setPendingShare(engagement.id, recipient.wallet_address, remaining);
+    }
+  }
+}
+
+/**
+ * Mirror of ShareClaimed: re-reads pendingShares() for the claimant rather
+ * than trusting the event's amount field, since claimShare() zeroes the
+ * on-chain balance atomically and the chain is the only authority here.
+ */
+export async function recordShareClaimed(
+  stores: { engagements: EngagementStore; splits: SplitStore; escrowReader: EscrowReader },
+  onChainId: string,
+  recipient: string,
+): Promise<void> {
+  const engagement = await stores.engagements.findByOnChainId(onChainId);
+  if (engagement === null) {
+    log.error(`indexer skipping ShareClaimed for unknown engagement ${onChainId}`);
+    return;
+  }
+  const remaining = await stores.escrowReader.getPendingShare(onChainId, recipient);
+  await stores.splits.setPendingShare(engagement.id, recipient, remaining ?? 0);
+}
+
+/**
+ * Watch PactCompleted + bond events, and (when splits/engagements/
+ * milestones/escrowReader are all wired) SplitReleased/ShareClaimed too.
+ * Returns the unwatch function, or null when unconfigured. No backfill:
+ * restarts only observe new events. Skips are logged and archived for ops
+ * via options.archive when provided.
  */
 export function startPactCompletedWatcher(options: IndexerOptions): (() => void) | null {
   if (options.rpcUrl === "" || options.escrowAddress === "") {
@@ -319,8 +403,71 @@ export function startPactCompletedWatcher(options: IndexerOptions): (() => void)
       });
     },
   });
+
+  let unwatchSplits: (() => void) | null = null;
+  if (
+    options.splits !== undefined &&
+    options.engagements !== undefined &&
+    options.milestones !== undefined &&
+    options.escrowReader !== undefined
+  ) {
+    const splitStores: SplitEventStores = {
+      engagements: options.engagements,
+      milestones: options.milestones,
+      splits: options.splits,
+      escrowReader: options.escrowReader,
+    };
+    unwatchSplits = client.watchContractEvent({
+      address: options.escrowAddress,
+      abi: [splitReleasedEvent, shareClaimedEvent],
+      onLogs: (logs) => {
+        void (async () => {
+          for (const entry of logs) {
+            const parsed = splitLogSchema.safeParse(entry);
+            const txHash = entry.transactionHash ?? null;
+            if (!parsed.success) {
+              log.error("indexer skipping split log with missing fields");
+              options.archive?.archive({
+                reason: "split_fields_missing",
+                engagementId: "unknown",
+                partyA: "unknown",
+                partyB: "unknown",
+                txHash,
+                archivedAt: new Date().toISOString(),
+              });
+              continue;
+            }
+            const { eventName, args } = parsed.data;
+            if (eventName === "SplitReleased" && args.engagementId !== undefined) {
+              await recordSplitReleased(splitStores, args.engagementId);
+            } else if (
+              eventName === "ShareClaimed" &&
+              args.engagementId !== undefined &&
+              args.recipient !== undefined
+            ) {
+              await recordShareClaimed(splitStores, args.engagementId, args.recipient);
+            } else {
+              log.error(`indexer skipping split log with unrecognized shape: ${eventName}`);
+              options.archive?.archive({
+                reason: "split_fields_missing",
+                engagementId: args.engagementId ?? "unknown",
+                partyA: "unknown",
+                partyB: args.recipient ?? "unknown",
+                txHash,
+                archivedAt: new Date().toISOString(),
+              });
+            }
+          }
+        })().catch(() => {
+          log.error("indexer split batch failed");
+        });
+      },
+    });
+  }
+
   return () => {
     unwatch();
     unwatchBonds();
+    unwatchSplits?.();
   };
 }

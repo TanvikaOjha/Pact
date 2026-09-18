@@ -12,13 +12,7 @@ import type {
 import type { ReputationStore } from "../repos/reputation.js";
 import { log } from "../services/log.js";
 import { jsonValueSchema, verifyWorldProof } from "../services/world.js";
-import {
-  completionSubmittedEmail,
-  milestoneReleasedEmail,
-  notifyAll,
-  recipientEmails,
-  type Notifier,
-} from "../services/notifications.js";
+import { completionSubmittedEmail, milestoneReleasedEmail, notifyAll, recipientEmails, type Notifier} from "../services/notifications.js";
 import { recordCompletionIfNeeded } from "../services/reputation.js";
 import { releaseAfter } from "../services/scheduler.js";
 import { devSessionId } from "./businesses.js";
@@ -79,6 +73,7 @@ export interface EngagementsRouteOptions {
   };
   /** Null when escrow reads are unavailable; recording proceeds (dev/offchain path). */
   checkReleased: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
+  checkWorldAttested: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
 }
 
 export function isParty(engagement: EngagementRow, businessId: string): boolean {
@@ -322,6 +317,18 @@ async function handleRelease(
     });
     return;
   }
+  if (options.checkWorldAttested !== null) {
+      const attested = await options.checkWorldAttested(engagement.on_chain_id, index);
+      // null = chain unreachable / off-chain engagement: fall back to the mirror hint.
+      if (attested === false) {
+        res.status(409).json({
+          error: "world_attestation_not_onchain",
+          threshold: options.highValueThreshold,
+        });
+        return;
+      }
+    }
+  
   if (options.checkReleased !== null) {
     const released = await options.checkReleased(engagement.on_chain_id, index);
     if (released === false) {
@@ -405,5 +412,9 @@ async function handleWorldCheck(
   }
   await options.milestones.setWorldSession(milestone.id, sessionId);
   log.info(`world session bound: engagement ${engagement.id} milestone ${index}`);
-  res.json({ worldSessionId: sessionId });
+  res.json({ worldSessionId: sessionId,
+    note: 
+    "Binding this session is not the same as the on-chain attestWorldVerification call " +
+      "PactEscrow requires before release; the trusted worldVerifier signer must still submit that tx.",
+   });
 }
