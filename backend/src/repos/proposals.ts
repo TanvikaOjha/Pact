@@ -1,5 +1,26 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// add near the top, alongside ProposalMilestone
+export interface ProposalSplitRecipient {
+  wallet: string;
+  sharesBps: number;
+}
+
+export interface StoredProposalTerms {
+  templateType: number;
+  title: string;
+  scope: string;
+  acceptanceCriteria: string;
+  totalAmount: number;
+  acceptanceWindowHours: number;
+  milestones: ProposalMilestone[];
+  fields: Record<string, string>;
+  splitShareA?: number;
+  splitShareB?: number;
+  /** M5 N-way split recipients, on-chain array order. */
+  splitRecipients?: ProposalSplitRecipient[];
+  termsHash: string;
+}
 export interface ProposalMilestone {
   index: number;
   name: string;
