@@ -24,6 +24,9 @@ import { createWorldRouter, createWorldRpContextRouter } from "./routes/world.js
 import { startPactCompletedWatcher } from "./services/indexer.js";
 import { log } from "./services/log.js";
 import { createNotifier } from "./services/notifications.js";
+import { createSupabaseSplitStore } from "./repos/splits.js";
+import { createSplitsRouter } from "./routes/splits.js";
+
 
 export function createApp() {
   const env = loadEnv();
@@ -48,6 +51,7 @@ export function createApp() {
     env.PRIVY_APP_SECRET,
     env.PRIVY_JWT_VERIFICATION_KEY,
   );
+  
   const requireAuth = createRequireAuth({
     allowDevAuth: env.ALLOW_DEV_AUTH,
     verifier: privyClient === null ? null : createPrivyVerifier(privyClient),
@@ -78,9 +82,13 @@ export function createApp() {
   );
   const registryReader = getRegistryReader(env.SEPOLIA_RPC_URL, env.PACT_REGISTRY_ADDRESS);
   const escrowReader = getEscrowReader(env.SEPOLIA_RPC_URL, env.PACT_ESCROW_ADDRESS);
+  const splitStore = createSupabaseSplitStore(
+    getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+  );
   app.use(
     "/api",
     createProposalsRouter({
+      splits: splitStore,
       store: createSupabaseProposalStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
@@ -94,6 +102,20 @@ export function createApp() {
       ensRoot: env.ENS_ROOT_NAME,
       requireAuth,
       notify,
+    }),
+  );
+  
+    apiRouter.use(
+    createSplitsRouter({
+      engagements: createSupabaseEngagementStore(
+        getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+      ),
+      businesses: businessStore,
+      splits: splitStore,
+      checkPendingShare:
+        escrowReader === null
+          ? null
+          : (onChainId: string, wallet: string) => escrowReader.getPendingShare(onChainId, wallet),
     }),
   );
   
@@ -129,7 +151,7 @@ export function createApp() {
           : (onChainId: string, index: number) => escrowReader.isWorldAttested(onChainId, index),
     }),
   );
-  
+
   // Scheduler sits outside apiRouter on purpose: apiRouter enforces Privy
   // user auth, while the sweep also accepts the CRON_SECRET service token
   // for external cron. Detect+notify by default; wire requestAutoRelease
@@ -208,7 +230,7 @@ export function createApp() {
     }),
   );
   app.use("/api", apiRouter);
-  const watcher = startPactCompletedWatcher({
+    const watcher = startPactCompletedWatcher({
     rpcUrl: env.SEPOLIA_RPC_URL,
     escrowAddress: env.PACT_ESCROW_ADDRESS ?? "",
     businesses: businessStore,
@@ -219,6 +241,14 @@ export function createApp() {
       getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
     ),
     archive: indexerArchive,
+    splits: splitStore,
+    engagements: createSupabaseEngagementStore(
+      getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+    ),
+    milestones: createSupabaseMilestoneStore(
+      getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
+    ),
+    escrowReader: escrowReader ?? undefined,
   });
   if (watcher !== null) {
     log.info("pact completed indexer watching");
