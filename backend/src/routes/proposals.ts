@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { BusinessStore } from "../repos/businesses.js";
 import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
 import type { NewProposal, ProposalStore, StoredProposalTerms } from "../repos/proposals.js";
+import type { NewSplitRecipient, SplitStore } from "../repos/splits.js";
 import { hashEngagementTerms, type EngagementTermsInput } from "../ens/pact-terms.js";
 import { log } from "../services/log.js";
 import {
@@ -16,6 +17,7 @@ import {
 
 const PROPOSAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_MILESTONES = 24;
+const MAX_SPLIT_RECIPIENTS = 20;
 
 const TEMPLATE_NAMES = new Map<number, string>([
   [1, "fixed"],
@@ -37,6 +39,12 @@ const milestoneSchema = z.object({
   worldRequired: z.boolean(),
 });
 
+/** M5: a recipient in on-chain array order. Position is implicit (array index). */
+const splitRecipientSchema = z.object({
+  wallet: z.string().min(1),
+  sharesBps: z.number().int().positive().max(10_000),
+});
+
 const proposalRequestSchema = z.object({
   templateType: z.number().int().min(1).max(6),
   title: z.string().min(1).max(200),
@@ -48,6 +56,8 @@ const proposalRequestSchema = z.object({
   fields: z.record(z.string(), z.string()).default({}),
   splitShareA: z.number().min(0).optional(),
   splitShareB: z.number().min(0).optional(),
+  /** M5 N-way split. Mutually exclusive with splitShareA/B in practice; both are allowed to coexist in storage. */
+  splitRecipients: z.array(splitRecipientSchema).max(MAX_SPLIT_RECIPIENTS).optional(),
 });
 
 export interface ProposalsRouteOptions {
@@ -59,23 +69,18 @@ export interface ProposalsRouteOptions {
   /** Applied to POST only — GET serves the counterparty link, pre-signup. */
   requireAuth: RequestHandler;
   notify?: Notifier;
+  /** Optional for backward compatibility with existing tests; required in production wiring for M5 splits to persist. */
+  splits?: SplitStore;
 }
 
 function milestoneTotal(milestones: z.infer<typeof milestoneSchema>[]): number {
   return milestones.reduce((sum, milestone) => sum + milestone.amount, 0);
 }
 
-/**
- * POST /proposals — authed proposer drafts terms; backend canonicalizes and
- * hashes exactly as the counterparty (and chain) will verify. The milestone
- * sum check mirrors PactEscrow funding (sum must equal total).
- *
- * GET /proposals/:token — public counterparty link view. 410 past expiry.
- *
- * POST /proposals/:token/accept — authed counterparty accepts: creates the
- * engagement mirror (parties, milestones, terms hash) and links the proposal
- * so double-accept is rejected. On-chain signatures + funding follow.
- */
+function splitRecipientsBpsTotal(recipients: z.infer<typeof splitRecipientSchema>[]): number {
+  return recipients.reduce((sum, recipient) => sum + recipient.sharesBps, 0);
+}
+
 export function createProposalsRouter(options: ProposalsRouteOptions): Router {
   const router = Router();
   router.post("/proposals", options.requireAuth, (req: Request, res: Response, next: NextFunction) => {
@@ -145,6 +150,10 @@ async function handleCreate(
     res.status(400).json({ error: "terms_mismatch" });
     return;
   }
+  if (draft.splitRecipients !== undefined && splitRecipientsBpsTotal(draft.splitRecipients) !== 10_000) {
+    res.status(400).json({ error: "split_shares_mismatch" });
+    return;
+  }
   const business = await options.businesses.findByWallet(identity.walletAddress);
   if (business === null) {
     res.status(403).json({ error: "business_required" });
@@ -167,6 +176,7 @@ async function handleCreate(
   };
   if (draft.splitShareA !== undefined) hashInput.splitShareA = draft.splitShareA;
   if (draft.splitShareB !== undefined) hashInput.splitShareB = draft.splitShareB;
+  if (draft.splitRecipients !== undefined) hashInput.splitRecipients = draft.splitRecipients;
   const terms: StoredProposalTerms = {
     templateType: draft.templateType,
     title: draft.title,
@@ -180,6 +190,7 @@ async function handleCreate(
   };
   if (draft.splitShareA !== undefined) terms.splitShareA = draft.splitShareA;
   if (draft.splitShareB !== undefined) terms.splitShareB = draft.splitShareB;
+  if (draft.splitRecipients !== undefined) terms.splitRecipients = draft.splitRecipients;
   const proposal: NewProposal = {
     token: randomUUID(),
     templateType: draft.templateType,
@@ -289,17 +300,26 @@ async function handleAccept(
       dueDate: milestone.due,
     })),
   );
+  if (options.splits !== undefined && row.fields.splitRecipients !== undefined) {
+    const recipients: NewSplitRecipient[] = row.fields.splitRecipients.map((recipient, position) => ({
+      engagementId: engagement.id,
+      walletAddress: recipient.wallet,
+      sharesBps: recipient.sharesBps,
+      position,
+    }));
+    await options.splits.insertRecipients(recipients);
+  }
   await options.store.markAccepted(token, engagement.id);
   log.info(`proposal accepted: ${token} -> engagement ${engagement.id}`);
   if (options.notify !== undefined) {
-    const recipients: string[] = [];
+    const recipientsToNotify: string[] = [];
     const proposerEmail = proposer.email ?? null;
-    if (proposerEmail !== null && proposerEmail !== "") recipients.push(proposerEmail);
+    if (proposerEmail !== null && proposerEmail !== "") recipientsToNotify.push(proposerEmail);
     const counterpartyEmail = counterparty.email ?? null;
-    if (counterpartyEmail !== null && counterpartyEmail !== "") recipients.push(counterpartyEmail);
+    if (counterpartyEmail !== null && counterpartyEmail !== "") recipientsToNotify.push(counterpartyEmail);
     await notifyAll(
       options.notify,
-      recipients,
+      recipientsToNotify,
       proposalAcceptedEmail(engagement.ens_subname, counterparty.ens_subname),
     );
   }
