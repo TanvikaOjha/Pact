@@ -18,6 +18,10 @@ export interface EngagementRow {
   visibility?: string | null;
   default_provider_bps?: number | null;
   challenge_window_seconds?: number | null;
+  /** Optional: absent on rows written before migration 0012 (M2 funding mirror). */
+  funded_count?: number;
+  funded_total?: number;
+  defaulted?: boolean;
 }
 
 export interface NewEngagement {
@@ -40,6 +44,15 @@ export interface EngagementStore {
   listByBusiness?(businessId: string): Promise<EngagementRow[]>;
   insert(engagement: NewEngagement): Promise<EngagementRow>;
   updateStatus(id: string, status: EngagementStatus): Promise<EngagementRow | null>;
+  /**
+   * M2: absolute funded-prefix state, mirroring fundEngagement (initial call)
+   * and topUp (extension) — both just move fundedCount/fundedTotal forward,
+   * so one method covers both on-chain calls. Never decreases in practice;
+   * callers are expected to validate monotonicity before calling.
+   */
+  recordFunding(id: string, fundedCount: number, fundedTotal: number): Promise<EngagementRow | null>;
+  /** M2: mirrors PactEscrow.recordDefault — sticky, never cleared. */
+  recordDefault(id: string): Promise<EngagementRow | null>;
 }
 
 export interface EngagementStatusPatch {
@@ -70,6 +83,14 @@ export interface MilestoneRow {
   /** Optional: absent on rows written before migration 0007. */
   evidence_hash?: string | null;
   late?: boolean;
+  /**
+   * Optional: absent on rows written before migration 0012 (M2 funding
+   * mirror). Undefined is treated as "unknown / not gated" by routes, so
+   * pre-M2 in-memory test stores that never populate this field keep
+   * behaving as before — only real Supabase rows (which default to false)
+   * are gated on it.
+   */
+  funded?: boolean;
 }
 
 export interface NewMilestone {
@@ -98,6 +119,8 @@ export interface MilestoneStore {
   markResolved(id: string, releasedAt: string): Promise<MilestoneRow | null>;
   setWorldSession(id: string, worldSessionId: string): Promise<MilestoneRow | null>;
   findByWorldSession(worldSessionId: string): Promise<MilestoneRow | null>;
+  /** M2: marks every milestone with index < fundedCount as funded=true. Idempotent, only ever grows. */
+  setFundedThrough(engagementId: string, fundedCount: number): Promise<void>;
 }
 
 function firstRow<T>(rows: T[] | null): T | null {
@@ -169,6 +192,26 @@ export function createSupabaseEngagementStore(client: SupabaseClient): Engagemen
         .select()
         .returns<EngagementRow[]>();
       if (result.error) throw new Error(`engagement update failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async recordFunding(id: string, fundedCount: number, fundedTotal: number): Promise<EngagementRow | null> {
+      const result = await client
+        .from("engagements")
+        .update({ funded_count: fundedCount, funded_total: fundedTotal })
+        .eq("id", id)
+        .select()
+        .returns<EngagementRow[]>();
+      if (result.error) throw new Error(`engagement funding update failed: ${result.error.message}`);
+      return firstRow(result.data);
+    },
+    async recordDefault(id: string): Promise<EngagementRow | null> {
+      const result = await client
+        .from("engagements")
+        .update({ defaulted: true })
+        .eq("id", id)
+        .select()
+        .returns<EngagementRow[]>();
+      if (result.error) throw new Error(`engagement default update failed: ${result.error.message}`);
       return firstRow(result.data);
     },
   };
@@ -305,8 +348,18 @@ export function createSupabaseMilestoneStore(client: SupabaseClient): MilestoneS
       if (result.error) throw new Error(`milestone lookup failed: ${result.error.message}`);
       return firstRow(result.data);
     },
+    async setFundedThrough(engagementId: string, fundedCount: number): Promise<void> {
+      const result = await client
+        .from("milestones")
+        .update({ funded: true })
+        .eq("engagement_id", engagementId)
+        .lt("index", fundedCount);
+      if (result.error) throw new Error(`milestone funding update failed: ${result.error.message}`);
+    },
   };
 }
+
+// --- Bonds (unchanged from prior revision) ---
 
 export interface BondRow {
   engagement_id: string;
@@ -332,7 +385,6 @@ export interface BondStore {
   recordSlashed(engagementId: string, slashedAmount: number): Promise<void>;
 }
 
-/** Mirror of on-chain bond state (see PactEscrow BondPosted/Returned/Slashed/Frozen). */
 export function createSupabaseBondStore(client: SupabaseClient): BondStore {
   return {
     async findByEngagement(engagementId: string): Promise<BondRow | null> {

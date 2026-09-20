@@ -3,6 +3,7 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import type { BusinessStore } from "../repos/businesses.js";
 import type { EngagementStore } from "../repos/engagements.js";
 import type { ReputationEventRow, ReputationStore } from "../repos/reputation.js";
+import type { ScoreReader } from "../chain/score.js";
 import { scoreForEvents } from "../services/reputation.js";
 
 const RECENT_LIMIT = 10;
@@ -12,6 +13,8 @@ export interface ReputationRouteOptions {
   reputation: ReputationStore;
   /** Absent in tests; without it every engagement reads as public (fail-open). */
   engagements?: EngagementStore;
+  /** Absent when chain reads are unavailable; onChain* fields are omitted (not null) in that case. */
+  scoreReader?: ScoreReader;
 }
 
 interface RecentEngagement {
@@ -47,6 +50,14 @@ async function counterpartySubnames(
  * indexer); anyone can reproduce it from on-chain events. Commit-visibility
  * engagements redact the counterparty subname (the link plaintext, not the
  * API, is the reveal channel).
+ *
+ * When a ScoreReader is wired, the response also includes the on-chain
+ * PactScore attestation (onChainScore/onChainTier/onChainAttestedAt) next
+ * to the backend's own live computation (score/tier). These can disagree
+ * briefly — attestation is a best-effort side-effect of completion/dispute
+ * routes, not a synchronous part of them — but should converge quickly.
+ * `onChainScore: null` with the fields present means the subname has never
+ * been attested; the fields are entirely absent when no ScoreReader is wired.
  */
 export function createReputationRouter(options: ReputationRouteOptions): Router {
   const router = Router();
@@ -96,7 +107,8 @@ async function handleReputation(
       txHash: event.tx_hash,
     };
   });
-  res.json({
+
+  const body: Record<string, unknown> = {
     ensSubname: business.ens_subname,
     completedCount,
     totalValue,
@@ -106,7 +118,17 @@ async function handleReputation(
     tier: score.tier,
     scoreVersion: score.version,
     recent,
-  });
+  };
+
+  if (options.scoreReader !== undefined) {
+    const onChain = await options.scoreReader.getOnChainScore(business.ens_subname);
+    body.onChainScore = onChain?.score ?? null;
+    body.onChainTier = onChain?.tier ?? null;
+    body.onChainVersion = onChain?.version ?? null;
+    body.onChainAttestedAt = onChain?.attestedAt ?? null;
+  }
+
+  res.json(body);
 }
 
 async function engagementVisibilities(

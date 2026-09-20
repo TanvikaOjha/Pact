@@ -2,7 +2,7 @@ import { createPublicClient, http, isAddress, parseAbiItem } from "viem";
 import { sepolia } from "viem/chains";
 import { z } from "zod";
 
-import type { EscrowReader } from "../chain/escrow.js";
+import type { EscrowReader, FundingState } from "../chain/escrow.js";
 import type { BusinessStore } from "../repos/businesses.js";
 import type { BondRow, BondStore, EngagementStore, MilestoneStore, NewBond } from "../repos/engagements.js";
 import type { NewReputationEvent, ReputationStore } from "../repos/reputation.js";
@@ -35,6 +35,17 @@ const splitReleasedEvent = parseAbiItem(
 
 const shareClaimedEvent = parseAbiItem(
   "event ShareClaimed(bytes32 indexed engagementId, address indexed recipient, uint256 amount)",
+);
+const engagementFundedEvent = parseAbiItem(
+  "event EngagementFunded(bytes32 indexed engagementId, address indexed client, address indexed provider, uint256 totalAmount, uint256 milestoneCount)",
+);
+
+const topUpFundedEvent = parseAbiItem(
+  "event TopUpFunded(bytes32 indexed engagementId, uint256 startIndex, uint256 count)",
+);
+
+const defaultRecordedEvent = parseAbiItem(
+  "event DefaultRecorded(bytes32 indexed engagementId)",
 );
 
 export interface PactCompletedLog {
@@ -118,6 +129,14 @@ const bondLogSchema = z.object({
       bonder: z.string().optional(),
       provider: z.string().optional(),
       amount: z.union([z.bigint(), z.number()]).optional(),
+    })
+    .passthrough(),
+});
+const fundingLogSchema = z.object({
+  eventName: z.string(),
+  args: z
+    .object({
+      engagementId: z.string().optional(),
     })
     .passthrough(),
 });
@@ -267,6 +286,36 @@ export async function recordSplitReleased(
     }
   }
 }
+export interface FundingEventStores {
+  engagements: EngagementStore;
+  milestones: MilestoneStore;
+  escrowReader: EscrowReader;
+}
+
+/**
+ * Re-syncs the funding mirror from EscrowInfo. Used for all three funding
+ * events (EngagementFunded, TopUpFunded, DefaultRecorded) — re-reading the
+ * whole struct is simpler and safer than trying to derive the delta from
+ * each event's own args, and it's idempotent regardless of which route (if
+ * any) already recorded the same change.
+ */
+export async function recordFundingSync(
+  stores: FundingEventStores,
+  onChainId: string,
+): Promise<void> {
+  const engagement = await stores.engagements.findByOnChainId(onChainId);
+  if (engagement === null) {
+    log.error(`indexer skipping funding sync for unknown engagement ${onChainId}`);
+    return;
+  }
+  const state = await stores.escrowReader.getFundingState(onChainId);
+  if (state === null) return;
+  await stores.engagements.recordFunding(engagement.id, state.fundedCount, state.fundedTotal);
+  await stores.milestones.setFundedThrough(engagement.id, state.fundedCount);
+  if (state.defaulted) {
+    await stores.engagements.recordDefault(engagement.id);
+  }
+}
 
 /**
  * Mirror of ShareClaimed: re-reads pendingShares() for the claimant rather
@@ -403,6 +452,45 @@ export function startPactCompletedWatcher(options: IndexerOptions): (() => void)
       });
     },
   });
+    let unwatchFunding: (() => void) | null = null;
+  if (
+    options.engagements !== undefined &&
+    options.milestones !== undefined &&
+    options.escrowReader !== undefined
+  ) {
+    const fundingStores: FundingEventStores = {
+      engagements: options.engagements,
+      milestones: options.milestones,
+      escrowReader: options.escrowReader,
+    };
+    unwatchFunding = client.watchContractEvent({
+      address: options.escrowAddress,
+      abi: [engagementFundedEvent, topUpFundedEvent, defaultRecordedEvent],
+      onLogs: (logs) => {
+        void (async () => {
+          for (const entry of logs) {
+            const parsed = fundingLogSchema.safeParse(entry);
+            const txHash = entry.transactionHash ?? null;
+            if (!parsed.success || parsed.data.args.engagementId === undefined) {
+              log.error("indexer skipping funding log with missing fields");
+              options.archive?.archive({
+                reason: "funding_fields_missing",
+                engagementId: "unknown",
+                partyA: "unknown",
+                partyB: "unknown",
+                txHash,
+                archivedAt: new Date().toISOString(),
+              });
+              continue;
+            }
+            await recordFundingSync(fundingStores, parsed.data.args.engagementId);
+          }
+        })().catch(() => {
+          log.error("indexer funding batch failed");
+        });
+      },
+    });
+  }
 
   let unwatchSplits: (() => void) | null = null;
   if (
@@ -469,5 +557,6 @@ export function startPactCompletedWatcher(options: IndexerOptions): (() => void)
     unwatch();
     unwatchBonds();
     unwatchSplits?.();
+    unwatchFunding?.();
   };
 }

@@ -3,6 +3,34 @@ import { sepolia } from "viem/chains";
 
 import { log } from "../services/log.js";
 
+
+/** Explicit view function returning the EscrowInfo struct (M2 funding fields included). */
+const escrowInfoAbi = [
+  {
+    type: "function",
+    name: "getEscrowInfo",
+    stateMutability: "view",
+    inputs: [{ name: "engagementId", type: "bytes32" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "client", type: "address" },
+          { name: "provider", type: "address" },
+          { name: "totalAmount", type: "uint256" },
+          { name: "milestoneCount", type: "uint8" },
+          { name: "funded", type: "bool" },
+          { name: "everDisputed", type: "bool" },
+          { name: "completedEmitted", type: "bool" },
+          { name: "fundedCount", type: "uint8" },
+          { name: "fundedTotal", type: "uint256" },
+          { name: "defaulted", type: "bool" },
+        ],
+      },
+    ],
+  },
+] as const;
 /** Auto-generated getter for `mapping(bytes32 => mapping(address => uint256)) public pendingShares`. */
 const pendingSharesGetterAbi = [
   {
@@ -47,14 +75,22 @@ const worldAttestedGetterAbi = [
 
 const BYTES32_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
+export interface FundingState {
+  fundedCount: number;
+  fundedTotal: number;
+  defaulted: boolean;
+}
+
 export interface EscrowReader {
-  /** Null when the engagement isn't on-chain-trackable; boolean from chain otherwise. */
   isReleased(onChainId: string, index: number): Promise<boolean | null>;
   isDisputed(onChainId: string, index: number): Promise<boolean | null>;
-  
   isWorldAttested(onChainId: string, index: number): Promise<boolean | null>;
   getPendingShare(onChainId: string, recipient: string): Promise<number | null>;
+  /** M2: authoritative fundedCount/fundedTotal/defaulted, read from EscrowInfo. */
+  getFundingState(onChainId: string): Promise<FundingState | null>;
+
 }
+
 
 /** Null when chain config is absent; callers degrade explicitly. */
 export function getEscrowReader(
@@ -82,6 +118,22 @@ export function getEscrowReader(
     });
   }
   return {
+        getFundingState: async (onChainId: string): Promise<FundingState | null> => {
+      if (!BYTES32_PATTERN.test(onChainId)) return null;
+      // SAFETY: regex enforces 0x + 64 hex chars, exactly the bytes32 shape.
+      const id = onChainId as `0x${string}`;
+      const info = await client.readContract({
+        address: escrow,
+        abi: escrowInfoAbi,
+        functionName: "getEscrowInfo",
+        args: [id],
+      });
+      return {
+        fundedCount: Number(info.fundedCount),
+        fundedTotal: Number(info.fundedTotal),
+        defaulted: info.defaulted,
+      };
+    },
     getPendingShare: async (onChainId: string, recipient: string): Promise<number | null> => {
       if (!BYTES32_PATTERN.test(onChainId) || !isAddress(recipient)) return null;
       // SAFETY: regex enforces 0x + 64 hex chars, exactly the bytes32 shape.
