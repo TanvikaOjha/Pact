@@ -26,7 +26,7 @@ import { log } from "./services/log.js";
 import { createNotifier } from "./services/notifications.js";
 import { createSupabaseSplitStore } from "./repos/splits.js";
 import { createSplitsRouter } from "./routes/splits.js";
-
+import { getScoreAttestor, getScoreReader } from "./chain/score.js";
 
 export function createApp() {
   const env = loadEnv();
@@ -82,6 +82,12 @@ export function createApp() {
   );
   const registryReader = getRegistryReader(env.SEPOLIA_RPC_URL, env.PACT_REGISTRY_ADDRESS);
   const escrowReader = getEscrowReader(env.SEPOLIA_RPC_URL, env.PACT_ESCROW_ADDRESS);
+  const scoreReader = getScoreReader(env.SEPOLIA_RPC_URL, env.PACT_SCORE_ADDRESS);
+  const scoreAttestor = getScoreAttestor(
+    env.SEPOLIA_RPC_URL,
+    env.PACT_SCORE_ADDRESS,
+    env.ATTESTOR_PRIVATE_KEY,
+  );
   const splitStore = createSupabaseSplitStore(
     getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
   );
@@ -121,6 +127,7 @@ export function createApp() {
   
    apiRouter.use(
     createEngagementsRouter({
+      scoreAttestor: scoreAttestor ?? undefined,
       engagements: createSupabaseEngagementStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
@@ -149,7 +156,12 @@ export function createApp() {
         escrowReader === null
           ? null
           : (onChainId: string, index: number) => escrowReader.isWorldAttested(onChainId, index),
-    }),
+     checkFundingState:
+        escrowReader === null
+          ? null
+          : (onChainId: string) => escrowReader.getFundingState(onChainId),
+        }),
+    
   );
 
   // Scheduler sits outside apiRouter on purpose: apiRouter enforces Privy
@@ -173,6 +185,7 @@ export function createApp() {
   );
   apiRouter.use(
     createDisputesRouter({
+      scoreAttestor: scoreAttestor ?? undefined,
       engagements: createSupabaseEngagementStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
@@ -206,6 +219,7 @@ export function createApp() {
       engagements: createSupabaseEngagementStore(
         getSupabase(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY),
       ),
+       scoreReader: scoreReader ?? undefined,
     }),
   );
   apiRouter.use(

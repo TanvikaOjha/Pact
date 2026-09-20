@@ -1,6 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
-
+import { attestEngagementParties } from "../services/scoreAttestor.js";
 import type { BusinessStore } from "../repos/businesses.js";
 import type { DisputeVoteStore } from "../repos/disputes.js";
 import type {
@@ -42,6 +42,10 @@ const createEngagementSchema = z.object({
 
 const EVIDENCE_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
+const fundBodySchema = z.object({
+  fundedCount: z.number().int().min(1),
+});
+
 const submitBodySchema = z.object({
   evidenceHash: z.string().regex(EVIDENCE_HASH_PATTERN).nullish(),
 });
@@ -64,6 +68,15 @@ export interface EngagementsRouteOptions {
   votes: DisputeVoteStore;
   reputation: ReputationStore;
   notify: Notifier;
+  scoreAttestor?: import("../chain/score.js").ScoreAttestor;
+    /**
+   * Null when escrow reads are unavailable. When present, /fund and /topup
+   * verify the caller's claimed fundedCount/fundedTotal against the chain's
+   * EscrowInfo before recording it in the mirror — the same pattern as
+   * checkReleased/checkWorldAttested: the mirror never asserts something
+   * the contract doesn't already agree with.
+   */
+  checkFundingState: ((onChainId: string) => Promise<{ fundedCount: number; fundedTotal: number; defaulted: boolean } | null>) | null;
   /** Milestones at or above this whole-USDC amount need a bound World session. */
   highValueThreshold: number;
   world: {
@@ -108,7 +121,128 @@ export function createEngagementsRouter(options: EngagementsRouteOptions): Route
   router.post("/engagements/:id/milestones/:index/world-check", (req: Request, res: Response, next: NextFunction) => {
     void handleWorldCheck(req, res, options).catch(next);
   });
+    router.post("/engagements/:id/fund", (req: Request, res: Response, next: NextFunction) => {
+    void handleFund(req, res, options).catch(next);
+  });
+  router.post("/engagements/:id/topup", (req: Request, res: Response, next: NextFunction) => {
+    void handleFund(req, res, options).catch(next);
+  });
+  router.post("/engagements/:id/default", (req: Request, res: Response, next: NextFunction) => {
+    void handleDefault(req, res, options).catch(next);
+  });
   return router;
+}
+
+/**
+ * Mirror of fundEngagement (first call, fundedCount starts at 0) and topUp
+ * (later calls, fundedCount already > 0). Both move the funded prefix
+ * forward; this computes fundedTotal from the milestones already on file
+ * (set at proposal-accept) and, when a chain reader is wired, cross-checks
+ * against EscrowInfo before writing anything.
+ */
+async function handleFund(
+  req: Request,
+  res: Response,
+  options: EngagementsRouteOptions,
+): Promise<void> {
+  const identity = req.identity;
+  if (identity === undefined) {
+    res.status(401).json({ error: "missing_identity" });
+    return;
+  }
+  const engagement = await options.engagements.findById(req.params.id ?? "");
+  if (engagement === null) {
+    res.status(404).json({ error: "engagement_not_found" });
+    return;
+  }
+  const business = await options.businesses.findByWallet(identity.walletAddress);
+  if (business === null || !isParty(engagement, business.id)) {
+    res.status(403).json({ error: "not_a_party" });
+    return;
+  }
+  const body = fundBodySchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ error: "invalid_request" });
+    return;
+  }
+  const { fundedCount } = body.data;
+  const currentFundedCount = engagement.funded_count ?? 0;
+  if (fundedCount <= currentFundedCount) {
+    res.status(409).json({ error: "funded_count_not_increasing", currentFundedCount });
+    return;
+  }
+  const milestones = await options.milestones.listByEngagement(engagement.id);
+  if (fundedCount > milestones.length) {
+    res.status(400).json({ error: "funded_count_exceeds_milestones", milestoneCount: milestones.length });
+    return;
+  }
+  const fundedTotal = milestones
+    .filter((milestone) => milestone.index < fundedCount)
+    .reduce((sum, milestone) => sum + milestone.amount, 0);
+
+  if (options.checkFundingState !== null) {
+    const chainState = await options.checkFundingState(engagement.on_chain_id);
+    if (chainState !== null) {
+      if (chainState.fundedCount < fundedCount || chainState.fundedTotal < fundedTotal) {
+        res.status(409).json({ error: "not_funded_onchain", chainState });
+        return;
+      }
+    }
+  }
+
+  await options.engagements.recordFunding(engagement.id, fundedCount, fundedTotal);
+  await options.milestones.setFundedThrough(engagement.id, fundedCount);
+  log.info(`funding recorded: engagement ${engagement.id} fundedCount=${fundedCount} fundedTotal=${fundedTotal}`);
+  res.json({ fundedCount, fundedTotal });
+}
+
+/**
+ * Mirror of PactEscrow.recordDefault: record-only, never taints the
+ * provider's onTime flag. Requires the next unfunded tranche's deadline +
+ * grace to have already passed — the same window the contract checks —
+ * using due_date as the mirror's deadline (grace isn't tracked in the
+ * mirror, so this is deliberately permissive relative to the contract;
+ * a chain reader, when present, is the real gate).
+ */
+async function handleDefault(
+  req: Request,
+  res: Response,
+  options: EngagementsRouteOptions,
+): Promise<void> {
+  const engagement = await options.engagements.findById(req.params.id ?? "");
+  if (engagement === null) {
+    res.status(404).json({ error: "engagement_not_found" });
+    return;
+  }
+  if (engagement.defaulted === true) {
+    res.status(409).json({ error: "already_defaulted" });
+    return;
+  }
+  const fundedCount = engagement.funded_count ?? 0;
+  const milestones = await options.milestones.listByEngagement(engagement.id);
+  if (fundedCount >= milestones.length) {
+    res.status(409).json({ error: "milestone_unfunded" }); // nothing left unfunded to default on
+    return;
+  }
+  const nextMilestone = milestones.find((milestone) => milestone.index === fundedCount) ?? null;
+  if (nextMilestone === null) {
+    res.status(409).json({ error: "milestone_not_found" });
+    return;
+  }
+  if (nextMilestone.due_date === null || Date.parse(nextMilestone.due_date) > Date.now()) {
+    res.status(409).json({ error: "window_not_closed" });
+    return;
+  }
+  if (options.checkFundingState !== null) {
+    const chainState = await options.checkFundingState(engagement.on_chain_id);
+    if (chainState !== null && !chainState.defaulted) {
+      res.status(409).json({ error: "not_defaulted_onchain" });
+      return;
+    }
+  }
+  await options.engagements.recordDefault(engagement.id);
+  log.info(`default recorded: engagement ${engagement.id}`);
+  res.json({ defaulted: true });
 }
 
 async function handleCreate(
@@ -221,6 +355,10 @@ async function handleSubmit(
   }
   if (milestone.submitted_at !== null) {
     res.status(409).json({ error: "already_submitted", releaseAfter: releaseAfter(milestone.submitted_at) });
+    return;
+  }
+   if (milestone.funded === false) {
+    res.status(409).json({ error: "milestone_unfunded" });
     return;
   }
   const body = submitBodySchema.safeParse(req.body ?? {});
@@ -347,6 +485,12 @@ async function handleRelease(
     },
     engagement.id,
   );
+  if (engagementCompleted && options.scoreAttestor !== undefined) {
+    await attestEngagementParties(
+      { businesses: options.businesses, reputation: options.reputation, attestor: options.scoreAttestor },
+      [engagement.party_a_id, engagement.party_b_id],
+    );
+  }
   log.info(`milestone released: engagement ${engagement.id} milestone ${index}`);
   await notifyAll(
     options.notify,

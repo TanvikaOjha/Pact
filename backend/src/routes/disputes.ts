@@ -7,6 +7,7 @@ import type { EngagementStore, MilestoneStore } from "../repos/engagements.js";
 import type { ReputationStore } from "../repos/reputation.js";
 import { releaseAfter } from "../services/scheduler.js";
 import { log } from "../services/log.js";
+import { attestEngagementParties } from "../services/scoreAttestor.js";
 import {
   disputeRaisedEmail,
   disputeResolvedEmail,
@@ -38,6 +39,7 @@ export interface DisputesRouteOptions {
   notify: Notifier;
   /** Null when escrow reads are unavailable; raise recording proceeds (dev/offchain path). */
   checkDisputed: ((onChainId: string, index: number) => Promise<boolean | null>) | null;
+  scoreAttestor?: import("../chain/score.js").ScoreAttestor;
 }
 
 /** Fallback challenge window (spec M3 default: 7 days) when terms omit one. */
@@ -139,6 +141,12 @@ async function handleResolveExecute(
     },
     engagement.id,
   );
+   if (engagementCompleted && options.scoreAttestor !== undefined) {
+    await attestEngagementParties(
+      { businesses: options.businesses, reputation: options.reputation, attestor: options.scoreAttestor },
+      [engagement.party_a_id, engagement.party_b_id],
+    );
+  }
   log.info(`resolution executed: engagement ${engagement.id} milestone ${index} challenged=${proposal.challenged}`);
   await notifyAll(
     options.notify,
@@ -271,6 +279,12 @@ async function handleResolve(
     },
     engagement.id,
   );
+  if (engagementCompleted && options.scoreAttestor !== undefined) {
+    await attestEngagementParties(
+      { businesses: options.businesses, reputation: options.reputation, attestor: options.scoreAttestor },
+      [engagement.party_a_id, engagement.party_b_id],
+    );
+  }
   log.info(`dispute resolved: engagement ${engagement.id} milestone ${index}`);
   await notifyAll(
     options.notify,
